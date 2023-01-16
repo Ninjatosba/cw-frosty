@@ -1,0 +1,60 @@
+// Test1
+// instantiate
+// //contract balance: 0
+
+// first bond
+// //amount:10 staked
+
+// contract balance updated = 100 reward
+
+// second bond
+// //amount: 20
+
+// third bond
+// //amount: 30
+
+//fourth bond
+// //amount: 40
+
+//every holder updates their rewards and query each holder
+
+//check state
+// holder: HolderResponse { address: "staker1", balance: Uint128(10), index: Decimal256(Uint256(10000000000000000000)), pending_rewards: Uint128(100), dec_rewards: Decimal256(Uint256(0)) }
+// holder2: HolderResponse { address: "staker2", balance: Uint128(20), index: Decimal256(Uint256(10000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+// holder3: HolderResponse { address: "staker3", balance: Uint128(30), index: Decimal256(Uint256(10000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+// holder4: HolderResponse { address: "staker4", balance: Uint128(40), index: Decimal256(Uint256(10000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+
+//staker1 recieves reward
+// staker1 rewards res:: Response { messages: [SubMsg { id: 0, msg: Bank(Send { to_address: "staker1", amount: [Coin { denom: "rewards", amount: Uint128(100) }] }), gas_limit: None, reply_on: Never }], attributes: [Attribute { key: "action", value: "receive_reward" }, Attribute { key: "rewards", value: "0" }, Attribute { key: "holder", value: "staker1" }, Attribute { key: "holder_balance", value: "10" }], events: [], data: None }
+
+//check state
+// state: StateResponse { global_index: Decimal256(Uint256(10000000000000000000)), total_staked: Uint128(100), prev_reward_balance: Uint128(100) }
+
+//check staker1
+// holder1: HolderResponse { address: "staker1", balance: Uint128(10), index: Decimal256(Uint256(10000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+
+//update balance to 200
+
+//staker5 bonds
+
+//staker6 bonds
+
+//staker5 updates reward
+//query staker5
+// holder5: HolderResponse { address: "staker5", balance: Uint128(50), index: Decimal256(Uint256(11000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+
+//staker6 updates reward
+//query staker6
+// holder6: HolderResponse { address: "staker6", balance: Uint128(60), index: Decimal256(Uint256(11000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+
+//check state
+// state: StateResponse { global_index: Decimal256(Uint256(10000000000000000000)), total_staked: Uint128(100), prev_reward_balance: Uint128(100) }
+
+//staker2 recieves reward
+// staker2 rewards res: Response { messages: [SubMsg { id: 0, msg: Bank(Send { to_address: "staker2", amount: [Coin { denom: "rewards", amount: Uint128(20) }] }), gas_limit: None, reply_on: Never }], attributes: [Attribute { key: "action", value: "receive_reward" }, Attribute { key: "rewards", value: "0" }, Attribute { key: "holder", value: "staker2" }, Attribute { key: "holder_balance", value: "20" }], events: [], data: None }
+
+//check state
+// state: StateResponse { global_index: Decimal256(Uint256(11000000000000000000)), total_staked: Uint128(210), prev_reward_balance: Uint128(200) }
+
+//check staker2
+// holder2: HolderResponse { address: "staker2", balance: Uint128(20), index: Decimal256(Uint256(11000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
