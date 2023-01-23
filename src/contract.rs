@@ -20,7 +20,9 @@ use crate::msg::{
     AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
 };
-use crate::state::{self, Config, StakePosition, State, CONFIG, STAKEPOSITIONS, STATE};
+use crate::state::{
+    self, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKEPOSITIONS, STATE,
+};
 use crate::ContractError;
 use cosmwasm_std;
 use std::convert::TryInto;
@@ -226,7 +228,7 @@ pub fn execute_bond(
                 .find(|stakeposition| stakeposition.unbond_duration == duration)
             {
                 update_reward_index(&mut state, cfg, deps, env)?;
-                update_stakers_rewards(deps, &mut state, env, staker, sender.clone())?;
+                update_stakers_rewards(deps, &mut state, env, staker)?;
                 stakeposition.staked_amount = stakeposition.staked_amount.add(amount);
                 stakeposition.index = state.global_index;
                 STAKEPOSITIONS.save(deps.storage, &sender, &staker)?;
@@ -331,15 +333,15 @@ pub fn execute_update_stakers_rewards(
     //validate address
     let addr = maybe_addr(deps.api, address)?.unwrap_or(info.sender);
     let mut staker = STAKEPOSITIONS.load(deps.storage, &Addr::unchecked(addr.clone()))?;
-    update_stakers_rewards(deps.branch(), &mut state, env, staker, addr)?;
+    let rewards = update_stakers_rewards(deps.branch(), &mut state, env, staker)?;
 
     STATE.save(deps.storage, &state)?;
+    STAKEPOSITIONS.save(deps.storage, &Addr::unchecked(addr.clone()), &staker)?;
 
     let res = Response::new()
-        .add_attribute("action", "update_reward_index")
-        .add_attribute("pending_rewards", holder.pending_rewards)
-        .add_attribute("new_index", state.global_index.to_string())
-        .add_attribute("holders index", holder.index.to_string());
+        .add_attribute("action", "update_stakers_rewards")
+        .add_attribute("address", addr)
+        .add_attribute("rewards", rewards);
     Ok(res)
 }
 
@@ -348,7 +350,6 @@ pub fn update_stakers_rewards(
     state: &mut State,
     env: Env,
     staker: Vec<StakePosition>,
-    user: Addr,
 ) -> Result<Uint128, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
@@ -384,7 +385,6 @@ pub fn update_stakers_rewards(
         stakeposition.pending_rewards += rewards_uint128;
         stakeposition.index = state.global_index;
     }
-    STAKEPOSITIONS.save(deps.storage, &user, &staker)?;
 
     Ok(total_rewards.iter().sum())
 }
@@ -424,6 +424,7 @@ pub fn execute_receive_reward(
         .add_message(msg)
         .add_attribute("action", "receive_reward")
         .add_attribute("rewards", rewards.to_string());
+    Ok(res)
 }
 
 pub fn execute_withdraw(
@@ -431,110 +432,147 @@ pub fn execute_withdraw(
     env: Env,
     info: MessageInfo,
     amount: Option<Uint128>,
+    duration: Duration,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
-    if !info.funds.is_empty() {
-        return Err(ContractError::DoNotSendFunds {});
+
+    let mut staker = STAKEPOSITIONS.load(deps.storage, &info.sender)?;
+    if staker.is_empty() {
+        return Err(ContractError::NoBond {});
     }
 
-    let mut holder = HOLDERS.load(deps.storage, &info.sender)?;
-    let withdraw_amount = amount.unwrap_or(holder.balance);
+    update_stakers_rewards(deps, &mut state, env, staker)?;
 
-    if holder.balance < withdraw_amount {
-        return Err(ContractError::DecreaseAmountExceeds(holder.balance));
+    let searchedPositionIndex = staker
+        .iter()
+        .position(|stakeposition| stakeposition.unbond_duration == duration);
+
+    if searchedPositionIndex.is_none() {
+        return Err(ContractError::NoBondForThisDuration {});
     }
 
-    update_holders_rewards(deps.branch(), &mut state, env.clone(), &mut holder)?;
+    let rewards = staker[searchedPositionIndex.unwrap()].pending_rewards;
 
-    //send rewards and withdraw amount to the holder
-    let res: Response = Response::new()
-        .add_message(CosmosMsg::Bank(BankMsg::Send {
-            to_address: info.sender.to_string(),
-            amount: vec![Coin {
-                denom: config.reward_denom.to_string(),
-                amount: holder.pending_rewards,
-            }],
-        }))
-        .add_message(CosmosMsg::Bank(BankMsg::Send {
-            to_address: info.sender.to_string(),
-            amount: vec![Coin {
-                denom: config.staked_token_denom.to_string(),
-                amount: withdraw_amount,
-            }],
-        }))
-        .add_attribute("action", "withdraw_stake")
-        .add_attribute("holder_address", info.sender.clone())
-        .add_attribute("amount", withdraw_amount)
-        .add_attribute("rewards claimed", holder.pending_rewards);
+    let withdraw_amount = match amount {
+        Some(amount) => {
+            if staker[searchedPositionIndex.unwrap()].staked_amount < amount {
+                return Err(ContractError::InsufficientStakedAmount {});
+            }
+            amount
+        }
+        None => staker[searchedPositionIndex.unwrap()].staked_amount,
+    };
 
-    holder.balance = (holder.balance.checked_sub(withdraw_amount))?;
-    state.total_staked = (state.total_staked.checked_sub(withdraw_amount))?;
-    holder.pending_rewards = Uint128::zero();
-    STATE.save(deps.storage, &state)?;
-    HOLDERS.save(deps.storage, &info.sender, &holder)?;
+    //create claim
+    let claim = Claim {
+        amount: withdraw_amount,
+        release_at: env.block.time.plus_nanos(duration.as_nanos() as u64),
+    };
+
+    //Load claims and save new one
+    let mut claims = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
+    claims.push(claim);
+    CLAIMS.save(deps.storage, &info.sender, &claims)?;
+
+    staker[searchedPositionIndex.unwrap()].staked_amount -= withdraw_amount;
+    staker[searchedPositionIndex.unwrap()].pending_rewards = Uint128::zero();
+    staker[searchedPositionIndex.unwrap()].last_claimed = env.block.time;
+
+    //if stakeposition is empty remove it
+    if staker[searchedPositionIndex.unwrap()].staked_amount == Uint128::zero() {
+        staker.remove(searchedPositionIndex.unwrap());
+    }
+
+    STAKEPOSITIONS.save(deps.storage, &info.sender, &staker)?;
+
+    let reward_asset = match (&config.reward_denom) {
+        Denom::Native(denom) => Asset::native(denom, rewards),
+
+        Denom::Cw20(address) => Asset::cw20(*address, rewards),
+    };
+    let reward_message = reward_asset.transfer_msg(info.sender)?;
+
+    let res = Response::new()
+        .add_message(reward_message)
+        .add_attribute("action", "withdraw")
+        .add_attribute("amount", withdraw_amount.to_string())
+        .add_attribute("unbond_time", claim.release_at.to_string())
+        .add_attribute("rewards", rewards.to_string());
     Ok(res)
 }
 
 //update config
-pub fn execute_update_config(
+// pub fn execute_update_config(
+//     deps: DepsMut,
+//     _env: Env,
+//     info: MessageInfo,
+//     staked_token_denom: Option<String>,
+//     reward_denom: Option<String>,
+//     admin: Option<String>,
+// ) -> Result<Response, ContractError> {
+//     let old_config: Config = CONFIG.load(deps.storage)?;
+
+//     //check if admin is an valid address and set admin
+//     let admin = match admin {
+//         Some(admin) => deps.api.addr_validate(&admin)?,
+//         None => old_config.clone().admin,
+//     };
+
+//     if info.sender != old_config.clone().admin {
+//         return Err(ContractError::Unauthorized {});
+//     };
+
+//     let config = Config {
+//         staked_token_denom: staked_token_denom.unwrap_or(old_config.staked_token_denom),
+//         reward_denom: reward_denom.unwrap_or(old_config.reward_denom),
+//         admin,
+//     };
+
+//     CONFIG.save(deps.storage, &config)?;
+
+//     let res = Response::new()
+//         .add_attribute("action", "update_config")
+//         .add_attribute("staked_token_denom", config.staked_token_denom)
+//         .add_attribute("reward_denom", config.reward_denom)
+//         .add_attribute("admin", config.admin);
+
+//     Ok(res)
+// }
+
+// pub fn make_config(
+//     deps: DepsMut,
+//     cw20_token_address: Option<String>,
+//     admin: Option<String>,
+//     native_token: Option<String>,
+// ) -> Result<Response, ContractError> {
+//     let config: Config = match (native_token, cw20_token_address) {
+//         (Some(native), None) => Ok(Config {
+//             cw20_token_address: None,
+//             native_token: Some(native),
+//             admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
+//         }),
+//         (None, Some(cw20_addr)) => Ok(Config {
+//             cw20_token_address: Some(deps.api.addr_validate(&cw20_addr)?),
+//             native_token: None,
+//             admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
+//         }),
+//         _ => Err(ContractError::InvalidTokenType {}),
+//     }?;
+//     CONFIG.save(deps.storage, &config)?;
+//     Ok(Response::default())
+// }
+
+pub fn create_claim(
     deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    staked_token_denom: Option<String>,
-    reward_denom: Option<String>,
-    admin: Option<String>,
-) -> Result<Response, ContractError> {
-    let old_config: Config = CONFIG.load(deps.storage)?;
-
-    //check if admin is an valid address and set admin
-    let admin = match admin {
-        Some(admin) => deps.api.addr_validate(&admin)?,
-        None => old_config.clone().admin,
-    };
-
-    if info.sender != old_config.clone().admin {
-        return Err(ContractError::Unauthorized {});
-    };
-
-    let config = Config {
-        staked_token_denom: staked_token_denom.unwrap_or(old_config.staked_token_denom),
-        reward_denom: reward_denom.unwrap_or(old_config.reward_denom),
-        admin,
-    };
-
-    CONFIG.save(deps.storage, &config)?;
-
-    let res = Response::new()
-        .add_attribute("action", "update_config")
-        .add_attribute("staked_token_denom", config.staked_token_denom)
-        .add_attribute("reward_denom", config.reward_denom)
-        .add_attribute("admin", config.admin);
-
-    Ok(res)
-}
-
-pub fn make_config(
-    deps: DepsMut,
-    cw20_token_address: Option<String>,
-    admin: Option<String>,
-    native_token: Option<String>,
-) -> Result<Response, ContractError> {
-    let config: Config = match (native_token, cw20_token_address) {
-        (Some(native), None) => Ok(Config {
-            cw20_token_address: None,
-            native_token: Some(native),
-            admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
-        }),
-        (None, Some(cw20_addr)) => Ok(Config {
-            cw20_token_address: Some(deps.api.addr_validate(&cw20_addr)?),
-            native_token: None,
-            admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
-        }),
-        _ => Err(ContractError::InvalidTokenType {}),
-    }?;
-    CONFIG.save(deps.storage, &config)?;
-    Ok(Response::default())
+    addr: &Addr,
+    amount: Uint128,
+    release_at: Timestamp,
+) -> StdResult<()> {
+    let claim = Claim { amount, release_at };
+    let claimList = vec![claim];
+    CLAIMS.save(deps.storage, addr, &claimList)?;
+    Ok(())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

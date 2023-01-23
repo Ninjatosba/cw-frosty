@@ -54,4 +54,10 @@ pub enum ContractError {
 
     #[error("Multiple tokens sent")]
     MultipleTokensSent {},
+
+    #[error("No Bond for duration sent")]
+    NoBondForThisDuration {},
+
+    #[error("Withdraw amount is higher than the bonded amount")]
+    InsufficientStakedAmount {},
 }
