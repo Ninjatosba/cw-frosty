@@ -22,6 +22,9 @@ pub enum ExecuteMsg {
     /// Update the reward index
     UpdateRewardIndex {},
 
+    FundReward {
+        end_time: Duration,
+    },
     UpdateHoldersReward {
         address: Option<String>,
     },
