@@ -87,11 +87,11 @@ pub fn execute(
         ExecuteMsg::UnboundStake {} => execute_claim_reward(deps, env, info),
         ExecuteMsg::WithdrawUnboundedStake { amount } => execute_withdraw(deps, env, info, amount),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
-        // ExecuteMsg::UpdateConfig {
-        //     staked_token_denom,
-        //     reward_denom,
-        //     admin,
-        // } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
+        ExecuteMsg::UpdateConfig {
+            staked_token_denom,
+            reward_denom,
+            admin,
+        } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
     }
 }
 
@@ -519,31 +519,35 @@ pub fn execute_update_config(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    config: Config,
+    stake_denom: Option<Denom>,
+    reward_denom: Option<Denom>,
+    admin: Option<String>,
 ) -> Result<Response, ContractError> {
-    let mut state = STATE.load(deps.storage)?;
-    let mut old_config = CONFIG.load(deps.storage)?;
+    let mut config = CONFIG.load(deps.storage)?;
 
-    if info.sender != old_config.admin {
+    if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
 
-    //update config
-    old_config.cw20_token_address = config.cw20_token_address;
-    old_config.native_token = config.native_token;
-    old_config.admin = config.admin;
+    if let Some(stake_denom) = stake_denom {
+        config.stake_denom = stake_denom;
+    }
 
-    CONFIG.save(deps.storage, &old_config)?;
+    if let Some(reward_denom) = reward_denom {
+        config.reward_denom = reward_denom;
+    }
 
-    //update state
-    state.global_index = Uint128::zero();
-    state.total_staked_amount = Uint128::zero();
-    state.total_staked_amount_native = Uint128::zero();
-    state.total_staked_amount_cw20 = Uint128::zero();
+    if let Some(admin) = admin {
+        config.admin = deps.api.addr_validate(&admin)?;
+    }
 
-    STATE.save(deps.storage, &state)?;
-
-    Ok(Response::default())
+    CONFIG.save(deps.storage, &config)?;
+    //TODO: add attributes properly
+    let res = Response::new()
+        .add_attribute("action", "update_config")
+        .add_attribute("stake_denom", config.stake_denom.to_string())
+        .add_attribute("reward_denom", config.reward_denom.to_string())
+        .add_attribute("admin", config.admin.to_string());
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

@@ -45,8 +45,8 @@ pub enum ExecuteMsg {
 
     //Update config
     UpdateConfig {
-        staked_token_denom: Option<String>,
-        reward_denom: Option<String>,
+        staked_token_denom: Option<Denom>,
+        reward_denom: Option<Denom>,
         admin: Option<String>,
     },
 }
