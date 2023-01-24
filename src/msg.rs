@@ -1,4 +1,4 @@
-use cw20::Cw20ReceiveMsg;
+use cw20::{Cw20ReceiveMsg, Denom};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -7,8 +7,8 @@ use cosmwasm_std::{Decimal256, Uint128};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    pub cw20_token_address: Option<String>,
-    pub native_token: Option<String>,
+    pub stake_denom: Denom,
+    pub reward_denom: Denom,
     pub admin: Option<String>,
 }
 

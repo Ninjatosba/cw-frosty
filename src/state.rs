@@ -29,7 +29,7 @@ pub const STATE: Item<State> = Item::new("state");
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    pub admin: Option<Addr>,
+    pub admin: Addr,
     pub stake_denom: Denom,
     pub reward_denom: Denom,
 }

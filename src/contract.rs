@@ -36,8 +36,16 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
-    //check if admin is a valid address and if it is, set it to the admin field else set it as sender
-    make_config(deps, msg.cw20_token_address, msg.admin, msg.native_token);
+    let admin = match msg.admin {
+        Some(admin) => deps.api.addr_validate(&admin)?,
+        None => info.sender.clone(),
+    };
+    let config = Config {
+        admin: admin.clone(),
+        stake_denom: msg.stake_denom,
+        reward_denom: msg.reward_denom,
+    };
+    CONFIG.save(deps.storage, &config)?;
     //set state
     let state = State {
         global_index: Decimal256::zero(),
@@ -79,11 +87,11 @@ pub fn execute(
         ExecuteMsg::UnboundStake {} => execute_claim_reward(deps, env, info),
         ExecuteMsg::WithdrawUnboundedStake { amount } => execute_withdraw(deps, env, info, amount),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
-        ExecuteMsg::UpdateConfig {
-            staked_token_denom,
-            reward_denom,
-            admin,
-        } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
+        // ExecuteMsg::UpdateConfig {
+        //     staked_token_denom,
+        //     reward_denom,
+        //     admin,
+        // } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
     }
 }
 
@@ -438,22 +446,25 @@ pub fn execute_withdraw(
     let config = CONFIG.load(deps.storage)?;
 
     let mut staker = STAKEPOSITIONS.load(deps.storage, &info.sender)?;
+
     if staker.is_empty() {
         return Err(ContractError::NoBond {});
     }
-
+    //update rewards for stakers every position event though only one position is being withdrawn
     update_stakers_rewards(deps, &mut state, env, staker)?;
 
+    //get the index of the position to be withdrawn
     let searchedPositionIndex = staker
         .iter()
         .position(|stakeposition| stakeposition.unbond_duration == duration);
-
+    //If no position found return error
     if searchedPositionIndex.is_none() {
         return Err(ContractError::NoBondForThisDuration {});
     }
 
     let rewards = staker[searchedPositionIndex.unwrap()].pending_rewards;
 
+    //if amount is none withdraw all
     let withdraw_amount = match amount {
         Some(amount) => {
             if staker[searchedPositionIndex.unwrap()].staked_amount < amount {
@@ -475,11 +486,12 @@ pub fn execute_withdraw(
     claims.push(claim);
     CLAIMS.save(deps.storage, &info.sender, &claims)?;
 
+    //update stakeposition
     staker[searchedPositionIndex.unwrap()].staked_amount -= withdraw_amount;
     staker[searchedPositionIndex.unwrap()].pending_rewards = Uint128::zero();
     staker[searchedPositionIndex.unwrap()].last_claimed = env.block.time;
 
-    //if stakeposition is empty remove it
+    //if stakeposition.stakedamount is zero remove it
     if staker[searchedPositionIndex.unwrap()].staked_amount == Uint128::zero() {
         staker.remove(searchedPositionIndex.unwrap());
     }
@@ -503,76 +515,35 @@ pub fn execute_withdraw(
 }
 
 //update config
-// pub fn execute_update_config(
-//     deps: DepsMut,
-//     _env: Env,
-//     info: MessageInfo,
-//     staked_token_denom: Option<String>,
-//     reward_denom: Option<String>,
-//     admin: Option<String>,
-// ) -> Result<Response, ContractError> {
-//     let old_config: Config = CONFIG.load(deps.storage)?;
-
-//     //check if admin is an valid address and set admin
-//     let admin = match admin {
-//         Some(admin) => deps.api.addr_validate(&admin)?,
-//         None => old_config.clone().admin,
-//     };
-
-//     if info.sender != old_config.clone().admin {
-//         return Err(ContractError::Unauthorized {});
-//     };
-
-//     let config = Config {
-//         staked_token_denom: staked_token_denom.unwrap_or(old_config.staked_token_denom),
-//         reward_denom: reward_denom.unwrap_or(old_config.reward_denom),
-//         admin,
-//     };
-
-//     CONFIG.save(deps.storage, &config)?;
-
-//     let res = Response::new()
-//         .add_attribute("action", "update_config")
-//         .add_attribute("staked_token_denom", config.staked_token_denom)
-//         .add_attribute("reward_denom", config.reward_denom)
-//         .add_attribute("admin", config.admin);
-
-//     Ok(res)
-// }
-
-// pub fn make_config(
-//     deps: DepsMut,
-//     cw20_token_address: Option<String>,
-//     admin: Option<String>,
-//     native_token: Option<String>,
-// ) -> Result<Response, ContractError> {
-//     let config: Config = match (native_token, cw20_token_address) {
-//         (Some(native), None) => Ok(Config {
-//             cw20_token_address: None,
-//             native_token: Some(native),
-//             admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
-//         }),
-//         (None, Some(cw20_addr)) => Ok(Config {
-//             cw20_token_address: Some(deps.api.addr_validate(&cw20_addr)?),
-//             native_token: None,
-//             admin: Some(deps.api.addr_validate(&admin.unwrap_or_default())?),
-//         }),
-//         _ => Err(ContractError::InvalidTokenType {}),
-//     }?;
-//     CONFIG.save(deps.storage, &config)?;
-//     Ok(Response::default())
-// }
-
-pub fn create_claim(
+pub fn execute_update_config(
     deps: DepsMut,
-    addr: &Addr,
-    amount: Uint128,
-    release_at: Timestamp,
-) -> StdResult<()> {
-    let claim = Claim { amount, release_at };
-    let claimList = vec![claim];
-    CLAIMS.save(deps.storage, addr, &claimList)?;
-    Ok(())
+    _env: Env,
+    info: MessageInfo,
+    config: Config,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let mut old_config = CONFIG.load(deps.storage)?;
+
+    if info.sender != old_config.admin {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    //update config
+    old_config.cw20_token_address = config.cw20_token_address;
+    old_config.native_token = config.native_token;
+    old_config.admin = config.admin;
+
+    CONFIG.save(deps.storage, &old_config)?;
+
+    //update state
+    state.global_index = Uint128::zero();
+    state.total_staked_amount = Uint128::zero();
+    state.total_staked_amount_native = Uint128::zero();
+    state.total_staked_amount_cw20 = Uint128::zero();
+
+    STATE.save(deps.storage, &state)?;
+
+    Ok(Response::default())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
