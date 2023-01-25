@@ -81,17 +81,20 @@ pub fn execute(
             unbonding_duration,
         ),
         ExecuteMsg::UpdateRewardIndex {} => execute_update_reward_index(deps, env),
-        ExecuteMsg::UpdateHoldersReward { address } => {
-            execute_update_holders_rewards(deps, env, info, address)
+        ExecuteMsg::UpdateStakersReward { address } => {
+            execute_update_stakers_rewards(deps, env, info, address)
         }
-        ExecuteMsg::UnboundStake {} => execute_claim_reward(deps, env, info),
-        ExecuteMsg::WithdrawUnboundedStake { amount } => execute_withdraw(deps, env, info, amount),
+        ExecuteMsg::UnbondStake { amount, duration } => {
+            execute_unbond(deps, env, info, amount, duration)
+        }
+        ExecuteMsg::ClaimUnbounded {} => execute_claim(deps, env, info),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
         ExecuteMsg::UpdateConfig {
             staked_token_denom,
             reward_denom,
             admin,
         } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
+        ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
     }
 }
 
@@ -435,7 +438,7 @@ pub fn execute_receive_reward(
     Ok(res)
 }
 
-pub fn execute_withdraw(
+pub fn execute_unbond(
     mut deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -513,7 +516,6 @@ pub fn execute_withdraw(
         .add_attribute("rewards", rewards.to_string());
     Ok(res)
 }
-
 //update config
 pub fn execute_update_config(
     deps: DepsMut,
@@ -542,14 +544,119 @@ pub fn execute_update_config(
     }
 
     CONFIG.save(deps.storage, &config)?;
-    //TODO: add attributes properly
-    let res = Response::new()
-        .add_attribute("action", "update_config")
-        .add_attribute("stake_denom", config.stake_denom.to_string())
-        .add_attribute("reward_denom", config.reward_denom.to_string())
-        .add_attribute("admin", config.admin.to_string());
+    //TODO find more elegant way
+
+    let mut res = Response::new();
+    res.add_attribute("action", "update_config");
+    //check stake denom if its native or cw20 the give response with respect ot that
+    match &config.stake_denom {
+        Denom::Native(denom) => {
+            res.add_attribute("stake_denom", denom);
+        }
+        Denom::Cw20(address) => {
+            res.add_attribute("stake_denom", address.to_string());
+        }
+    }
+    //check reward denom if its native or cw20 the give response with respect ot that
+    match &config.reward_denom {
+        Denom::Native(denom) => {
+            res.add_attribute("reward_denom", denom);
+        }
+        Denom::Cw20(address) => {
+            res.add_attribute("reward_denom", address.to_string());
+        }
+    }
+    res.add_attribute("admin", config.admin.to_string());
+
+    Ok(res)
 }
 
+pub fn execute_claim(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    let config = CONFIG.load(deps.storage)?;
+    if claim.is_empty() {
+        return Err(ContractError::NoClaim {});
+    }
+    //filter claim vector and make another vector which contains only mature claims
+    let mature_claims: Vec<Claim> = claim
+        .into_iter()
+        .filter(|claim| claim.release_at <= env.block.time)
+        .collect();
+    //if no mature claims return error
+    if mature_claims.is_empty() {
+        return Err(ContractError::WaitUnbonding {});
+    }
+    //sum mature claims
+    let mut total_claim: Uint128 = Uint128::zero();
+    for claim in mature_claims.iter() {
+        total_claim += claim.amount;
+    }
+    //remove mature claims from claim vector
+    let mut new_claims: Vec<Claim> = claim
+        .into_iter()
+        .filter(|claim| claim.release_at > env.block.time)
+        .collect();
+    //save new claim vector
+    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+
+    let stake_asset = match (&config.stake_denom) {
+        Denom::Native(denom) => Asset::native(denom, total_claim),
+
+        Denom::Cw20(address) => Asset::cw20(*address, total_claim),
+    };
+    let asset_message = stake_asset.transfer_msg(info.sender)?;
+
+    let res = Response::new()
+        .add_message(asset_message)
+        .add_attribute("action", "claim")
+        .add_attribute("amount", total_claim.to_string());
+    Ok(res)
+}
+
+pub fn execute_force_claim(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    unbond_time: Timestamp,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    if claim.is_empty() {
+        return Err(ContractError::NoClaim {});
+    }
+    //find desired claim if not found return error
+    let desired_claim: Claim = claim
+        .into_iter()
+        .find(|claim| claim.release_at == unbond_time)
+        .ok_or(ContractError::NoClaimForTimestamp {})?;
+
+    //remove desired claim from claim vector
+    let mut new_claims: Vec<Claim> = claim
+        .into_iter()
+        .filter(|claim| claim.release_at != unbond_time)
+        .collect();
+    //save new claim vector
+    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+
+    //TODO : add a force_unbound cut
+
+    let stake_asset = match (&config.stake_denom) {
+        Denom::Native(denom) => Asset::native(denom, desired_claim.amount),
+
+        Denom::Cw20(address) => Asset::cw20(*address, desired_claim.amount),
+    };
+    let asset_message = stake_asset.transfer_msg(info.sender)?;
+
+    let res = Response::new()
+        .add_message(asset_message)
+        .add_attribute("action", "force_claim")
+        .add_attribute("amount", desired_claim.amount.to_string());
+    Ok(res)
+}
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {

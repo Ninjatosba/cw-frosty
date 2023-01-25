@@ -31,6 +31,12 @@ pub enum ContractError {
     #[error("Wait for the unbonding")]
     WaitUnbonding {},
 
+    #[error("No claim for user")]
+    NoClaim {},
+
+    #[error("No claim for sent timestamp")]
+    NoClaimForTimestamp {},
+
     #[error("No bond")]
     NoBond {},
 

@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use cosmwasm_std::{Decimal256, Uint128};
+use cosmwasm_std::{Addr, Decimal256, Timestamp, Uint128};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
@@ -25,7 +25,10 @@ pub enum ExecuteMsg {
     FundReward {
         end_time: Duration,
     },
-    UpdateHoldersReward {
+    ForceClaim {
+        unbond_time: Timestamp,
+    },
+    UpdateStakersReward {
         address: Option<String>,
     },
     ////////////////////
@@ -34,12 +37,13 @@ pub enum ExecuteMsg {
     Bond {
         unbonding_duration: Duration,
     },
-    /// Unbound user staking balance
-    /// Withdraw rewards to pending rewards
     /// Set current reward index to global index
-    UnbondStake {},
+    UnbondStake {
+        amount: Option<Uint128>,
+        duration: Duration,
+    },
 
-    WithdrawUnboundedStake {},
+    ClaimUnbounded {},
 
     ReceiveReward {},
 
@@ -62,14 +66,17 @@ pub enum ReceiveMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     State {},
-    AccruedRewards {
-        address: String,
-    },
-    Holder {
-        address: String,
-    },
     Config {},
-    Holders {
+    ClaimableRewards {
+        address: String,
+    },
+    StakerInfo {
+        address: String,
+    },
+    ListClaims {
+        address: String,
+    },
+    ListStakers {
         start_after: Option<String>,
         limit: Option<u32>,
     },
@@ -83,9 +90,9 @@ pub struct StateResponse {
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub staked_token_denom: String,
-    pub reward_denom: String,
-    pub admin: String,
+    pub staked_denom: Denom,
+    pub reward_denom: Denom,
+    pub admin: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
