@@ -29,46 +29,47 @@ use cosmwasm_std;
 use std::convert::TryInto;
 use std::ops::Add;
 use std::str::FromStr;
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn instantiate(
-//     deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     msg: InstantiateMsg,
-// ) -> StdResult<Response> {
-//     let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
-//     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn instantiate(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
+    let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
+    // validate fee_collector address
+    let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
 
-//     let config = Config {
-//         admin: admin.clone(),
-//         stake_denom: msg.stake_denom,
-//         reward_denom: msg.reward_denom,
-//         force_claim_ratio: msg.force_claim_ratio,
-//         fee_collector: fee_collector_address,
-//     };
-//     CONFIG.save(deps.storage, &config)?;
-//     //set state
-//     let state = State {
-//         global_index: Decimal256::zero(),
-//         total_staked: Uint128::zero(),
-//         total_weight: Decimal256::zero(),
-//         reward_end_time: Timestamp::from_seconds(0),
-//         total_reward_supply: Uint128::zero(),
-//         remaining_reward_supply: Uint128::zero(),
-//         start_time: env.block.time,
-//         last_updated: env.block.time,
-//     };
-//     //
-//     STATE.save(deps.storage, &state)?;
-//     let res = Response::default()
-//         .add_attribute("method", "instantiate")
-//         .add_attribute("admin", admin.clone())
-//         .add_attribute("stake_denom", config.stake_denom.to_string())
-//         .add_attribute("reward_denom", config.reward_denom.to_string())
-//         .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
-//         .add_attribute("fee_collector", config.fee_collector);
-//     Ok(res)
-// }
+    let config = Config {
+        admin: admin.clone(),
+        stake_denom: msg.stake_denom,
+        reward_denom: msg.reward_denom,
+        force_claim_ratio: msg.force_claim_ratio,
+        fee_collector: fee_collector_address,
+    };
+    CONFIG.save(deps.storage, &config)?;
+    //set state
+    let state = State {
+        global_index: Decimal256::zero(),
+        total_staked: Uint128::zero(),
+        total_weight: Decimal256::zero(),
+        reward_end_time: Timestamp::from_seconds(0),
+        total_reward_supply: Uint128::zero(),
+        remaining_reward_supply: Uint128::zero(),
+        start_time: env.block.time,
+        last_updated: env.block.time,
+    };
+    //
+    STATE.save(deps.storage, &state)?;
+    let res = Response::default()
+        .add_attribute("method", "instantiate")
+        .add_attribute("admin", admin.clone())
+        .add_attribute("stake_denom", config.stake_denom.to_string())
+        .add_attribute("reward_denom", config.reward_denom.to_string())
+        .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
+        .add_attribute("fee_collector", config.fee_collector);
+    Ok(res)
+}
 
 // #[cfg_attr(not(feature = "library"), entry_point)]
 // pub fn execute(

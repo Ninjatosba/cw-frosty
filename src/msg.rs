@@ -8,8 +8,8 @@ use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    pub stake_denom: Denom,
-    pub reward_denom: Denom,
+    pub stake_denom: Addr,
+    pub reward_denom: Addr,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
