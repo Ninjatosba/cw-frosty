@@ -1,6 +1,6 @@
 use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
-use crate::denom::Denom;
+use crate::helper;
 use cw_storage_plus::{Item, Map};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,11 @@ pub struct Config {
     pub reward_denom: Addr,
     pub force_claim_ratio: Decimal,
     pub fee_collector: Addr,
+}
+
+pub struct Balance {
+    pub denom: Addr,
+    pub amount: Uint128,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");

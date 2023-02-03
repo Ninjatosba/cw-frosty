@@ -6,7 +6,7 @@ use cosmwasm_std::{
 };
 use cosmwasm_std::{from_slice, Api};
 use cw0::{maybe_addr, PaymentError};
-use cw20::{Balance, Cw20CoinVerified, Cw20Contract};
+use cw20::{Cw20CoinVerified, Cw20Contract};
 use cw20::{Cw20QueryMsg, Cw20ReceiveMsg};
 use cw_asset::Asset;
 use cw_storage_plus::Bound;
@@ -16,13 +16,13 @@ use cw_utils::must_pay;
 use serde::de;
 use std::time::Duration;
 
-use crate::denom::Denom;
+use crate::helper;
 use crate::msg::{
     AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
 };
 use crate::state::{
-    self, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKEPOSITIONS, STATE,
+    self, Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKEPOSITIONS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -59,7 +59,6 @@ pub fn instantiate(
         start_time: env.block.time,
         last_updated: env.block.time,
     };
-    //
     STATE.save(deps.storage, &state)?;
     let res = Response::default()
         .add_attribute("method", "instantiate")
@@ -109,81 +108,65 @@ pub fn instantiate(
 // }
 
 // /// Increase global_index according to claimed rewards amount
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn execute_receive(
-//     deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     wrapper: Cw20ReceiveMsg,
-// ) -> Result<Response, ContractError> {
-//     // let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
-//     // let config = CONFIG.load(deps.storage)?;
-//     // // TODO: check sender anycontract that send cw20 token to this contract can execute this function
-//     // let api = deps.api;
-//     // let balance = Balance::Cw20(Cw20CoinVerified {
-//     //     address: info.sender,
-//     //     amount: wrapper.amount,
-//     // });
-//     // match msg {
-//     //     ReceiveMsg::Bond { duration } => execute_bond(
-//     //         deps,
-//     //         env,
-//     //         balance,
-//     //         api.addr_validate(&wrapper.sender)?,
-//     //         duration,
-//     //     ),
-//     //     ReceiveMsg::RewardUpdate { duration } => fund_reward(deps, env, balance, duration),
-//     // }
-// }
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute_receive(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    wrapper: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
+    let config = CONFIG.load(deps.storage)?;
+    // TODO: check sender any contract that send cw20 token to this contract can execute this function
+    let api = deps.api;
+    let balance = Balance {
+        denom: info.sender,
+        amount: wrapper.amount,
+    };
+    match msg {
+        ReceiveMsg::Bond { duration } => execute_bond(
+            deps,
+            env,
+            balance,
+            api.addr_validate(&wrapper.sender)?,
+            duration,
+        ),
+        ReceiveMsg::RewardUpdate { duration } => fund_reward(deps, env, balance, duration),
+    }
+}
 
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn fund_reward(
-//     deps: DepsMut,
-//     env: Env,
-//     amount: Balance,
-//     duration: Duration,
-// ) -> Result<Response, ContractError> {
-//     // let cfg = CONFIG.load(deps.storage)?;
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn fund_reward(
+    deps: DepsMut,
+    env: Env,
+    balance: Balance,
+    duration: Duration,
+) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    // check denom
+    if balance.denom != cfg.reward_denom {
+        return Err(ContractError::InvalidCw20TokenAddress {});
+    }
+    let amount = balance.amount;
 
-//     // let amount = match (&cfg.reward_denom, &amount) {
-//     //     (Denom::Cw20(want), Balance::Cw20(have)) => {
-//     //         if want == &have.address {
-//     //             Ok(have.amount)
-//     //         } else {
-//     //             Err(ContractError::DenomNotSupported {})
-//     //         }
-//     //     }
-//     //     (Denom::Native(want), Balance::Native(have)) => {
-//     //         if have.clone().into_vec().len() != 1 {
-//     //             return Err(ContractError::MultipleTokensSent {});
-//     //         }
-//     //         if want == &have.clone().into_vec()[0].denom.to_string() {
-//     //             Ok(have.clone().into_vec()[0].amount)
-//     //         } else {
-//     //             Err(ContractError::DenomNotSupported {})
-//     //         }
-//     //     }
-//     //     _ => Err(ContractError::DenomNotSupported {}),
-//     // }?;
+    let mut state = STATE.load(deps.storage)?;
 
-//     // let mut state = STATE.load(deps.storage)?;
+    let unclaimed_reward = state.remaining_reward_supply;
 
-//     // let unclaimed_reward = state.remaining_reward_supply;
+    state.total_reward_supply = unclaimed_reward + amount;
 
-//     // state.total_reward_supply = unclaimed_reward + amount;
+    state.remaining_reward_supply = unclaimed_reward + amount;
 
-//     // state.remaining_reward_supply = unclaimed_reward + amount;
+    state.reward_end_time = state
+        .reward_end_time
+        .plus_nanos(duration.as_nanos().try_into().unwrap());
 
-//     // state.reward_end_time = state
-//     //     .reward_end_time
-//     //     .plus_nanos(duration.as_nanos().try_into().unwrap());
+    STATE.save(deps.storage, &state)?;
+    //TODO add responses
+    let res = Response::new().add_attribute("action", "fund_reward");
 
-//     // STATE.save(deps.storage, &state)?;
-//     // //TODO add responses
-//     // let res = Response::new().add_attribute("action", "fund_reward");
-
-//     // Ok(res)
-// }
+    Ok(res)
+}
 
 // #[cfg_attr(not(feature = "library"), entry_point)]
 // pub fn execute_bond(

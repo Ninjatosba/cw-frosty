@@ -1,8 +1,8 @@
-use crate::denom::Denom;
+use crate::helper;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{ops::Add, time::Duration};
 
 use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
@@ -52,8 +52,8 @@ pub enum ExecuteMsg {
 
     //Update config
     UpdateConfig {
-        staked_token_denom: Option<Denom>,
-        reward_denom: Option<Denom>,
+        staked_token_denom: Option<Addr>,
+        reward_denom: Option<Addr>,
         admin: Option<String>,
     },
 }
@@ -93,8 +93,8 @@ pub struct StateResponse {
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub staked_denom: Denom,
-    pub reward_denom: Denom,
+    pub staked_denom: Addr,
+    pub reward_denom: Addr,
     pub admin: Addr,
 }
 
