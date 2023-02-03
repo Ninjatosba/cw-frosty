@@ -58,3 +58,4 @@
 
 //check staker2
 // holder2: HolderResponse { address: "staker2", balance: Uint128(20), index: Decimal256(Uint256(11000000000000000000)), pending_rewards: Uint128(0), dec_rewards: Decimal256(Uint256(0)) }
+

@@ -1,7 +1,6 @@
-use cosmwasm_std::{Addr, Decimal256, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
-use cw20::Denom;
-use cw_controllers::Claims;
+use crate::denom::Denom;
 use cw_storage_plus::{Item, Map};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +22,7 @@ pub struct State {
 pub struct Claim {
     pub amount: Uint128,
     pub release_at: Timestamp,
+    pub unbond_at: Timestamp,
 }
 
 pub const STATE: Item<State> = Item::new("state");
@@ -32,6 +32,8 @@ pub struct Config {
     pub admin: Addr,
     pub stake_denom: Denom,
     pub reward_denom: Denom,
+    pub force_claim_ratio: Decimal,
+    pub fee_collector: Addr,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");

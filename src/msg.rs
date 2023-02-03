@@ -1,15 +1,18 @@
-use cw20::{Cw20ReceiveMsg, Denom};
+use crate::denom::Denom;
+use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use cosmwasm_std::{Addr, Decimal256, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
     pub stake_denom: Denom,
     pub reward_denom: Denom,
     pub admin: Option<String>,
+    pub force_claim_ratio: Decimal,
+    pub fee_collector: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

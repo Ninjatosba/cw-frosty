@@ -1,12 +1,12 @@
 use cosmwasm_std::testing::MockQuerier;
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal256, Deps, DepsMut, Env,
-    Fraction, Isqrt, MessageInfo, Order, Response, StdError, StdResult, Timestamp, Uint128,
-    Uint256,
+    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Decimal256, Deps,
+    DepsMut, Env, Fraction, Isqrt, MessageInfo, Order, Response, StdError, StdResult, Timestamp,
+    Uint128, Uint256,
 };
 use cosmwasm_std::{from_slice, Api};
 use cw0::{maybe_addr, PaymentError};
-use cw20::{Balance, Cw20CoinVerified, Cw20Contract, Denom};
+use cw20::{Balance, Cw20CoinVerified, Cw20Contract};
 use cw20::{Cw20QueryMsg, Cw20ReceiveMsg};
 use cw_asset::Asset;
 use cw_storage_plus::Bound;
@@ -16,6 +16,7 @@ use cw_utils::must_pay;
 use serde::de;
 use std::time::Duration;
 
+use crate::denom::Denom;
 use crate::msg::{
     AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
@@ -26,7 +27,6 @@ use crate::state::{
 use crate::ContractError;
 use cosmwasm_std;
 use std::convert::TryInto;
-use std::fmt::{format, Debug, Display};
 use std::ops::Add;
 use std::str::FromStr;
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -36,14 +36,15 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
-    let admin = match msg.admin {
-        Some(admin) => deps.api.addr_validate(&admin)?,
-        None => info.sender.clone(),
-    };
+    let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
+    let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
+
     let config = Config {
         admin: admin.clone(),
         stake_denom: msg.stake_denom,
         reward_denom: msg.reward_denom,
+        force_claim_ratio: msg.force_claim_ratio,
+        fee_collector: fee_collector_address,
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -57,8 +58,16 @@ pub fn instantiate(
         start_time: env.block.time,
         last_updated: env.block.time,
     };
-
-    Ok(Response::default())
+    //
+    STATE.save(deps.storage, &state)?;
+    let res = Response::default()
+        .add_attribute("method", "instantiate")
+        .add_attribute("admin", admin.clone())
+        .add_attribute("stake_denom", config.stake_denom.to_string())
+        .add_attribute("reward_denom", config.reward_denom.to_string())
+        .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
+        .add_attribute("fee_collector", config.fee_collector);
+    Ok(res)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -106,13 +115,9 @@ pub fn execute_receive(
     info: MessageInfo,
     wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    // info.sender is the address of the cw20 contract (that re-sent this message).
-    // wrapper.sender is the address of the user that requested the cw20 contract to send this.
-    // This cannot be fully trusted (the cw20 contract can fake it), so only use it for actions
-    // in the address's favor (like paying/bonding tokens, not withdrawls)
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
     let config = CONFIG.load(deps.storage)?;
-
+    // TODO: check sender anycontract that send cw20 token to this contract can execute this function
     let api = deps.api;
     let balance = Balance::Cw20(Cw20CoinVerified {
         address: info.sender,
@@ -148,11 +153,11 @@ pub fn fund_reward(
             }
         }
         (Denom::Native(want), Balance::Native(have)) => {
-            if have.into_vec().len() != 1 {
+            if have.clone().into_vec().len() != 1 {
                 return Err(ContractError::MultipleTokensSent {});
             }
-            if want == &have.into_vec()[0].denom.to_string() {
-                Ok(have.into_vec()[0].amount)
+            if want == &have.clone().into_vec()[0].denom.to_string() {
+                Ok(have.clone().into_vec()[0].amount)
             } else {
                 Err(ContractError::DenomNotSupported {})
             }
@@ -181,7 +186,7 @@ pub fn fund_reward(
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute_bond(
-    mut deps: DepsMut,
+    deps: DepsMut,
     env: Env,
     amount: Balance,
     sender: Addr,
@@ -198,11 +203,11 @@ pub fn execute_bond(
             }
         }
         (Denom::Native(want), Balance::Native(have)) => {
-            if have.into_vec().len() != 1 {
+            if have.clone().into_vec().len() != 1 {
                 return Err(ContractError::MultipleTokensSent {});
             }
-            if want == &have.into_vec()[0].denom.to_string() {
-                Ok(have.into_vec()[0].amount)
+            if want == &have.clone().into_vec()[0].denom.to_string() {
+                Ok(have.clone().into_vec()[0].amount)
             } else {
                 Err(ContractError::DenomNotSupported {})
             }
@@ -217,15 +222,15 @@ pub fn execute_bond(
 
     match staker {
         None => {
-            update_reward_index(&mut state, cfg, deps, env);
+            update_reward_index(&mut state, cfg, deps, env.clone());
             let staker = StakePosition {
                 staked_amount: amount,
                 pending_rewards: Uint128::zero(),
                 index: state.global_index,
                 dec_rewards: Decimal256::zero(),
                 unbond_duration: duration,
-                bond_time: env.block.time,
-                last_claimed: env.block.time,
+                bond_time: env.clone().block.time,
+                last_claimed: env.clone().block.time,
             };
             let mut staker = vec![staker];
             state.total_weight +=
@@ -293,7 +298,7 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
 pub fn update_reward_index(
     state: &mut State,
     config: Config,
-    mut deps: DepsMut,
+    deps: DepsMut,
     env: Env,
 ) -> Result<(), ContractError> {
     // Zero staking check
@@ -316,16 +321,13 @@ pub fn update_reward_index(
         state
             .total_weight
             .numerator()
-            .checked_mul(state.total_staked.into())
-            .unwrap()
-            .checked_mul(new_dist_balance.into())
-            .unwrap(),
+            .checked_mul(state.total_staked.into())?
+            .checked_mul(new_dist_balance.into())?,
         state.total_weight.denominator(),
     );
 
     state.global_index += adding_index;
     state.last_updated = env.block.time;
-    STATE.save(deps.storage, &state)?;
     Ok(())
 }
 
@@ -379,22 +381,22 @@ pub fn update_stakers_rewards(
 
         let multiplier = index_diff.checked_mul(position_weight).unwrap();
 
-        let new_distrubuted_reward = (multiplier
-            .checked_mul(Decimal256::from_ratio(stakeposition.staked_amount, 1)))
-        .unwrap()
-        .checked_add(stakeposition.dec_rewards)
-        .unwrap();
+        // let new_distrubuted_reward = (multiplier
+        //     .checked_mul(Decimal256::from_ratio(stakeposition.staked_amount, 1)))
+        // .unwrap()
+        // .checked_add(stakeposition.dec_rewards)
+        // .unwrap();
 
-        let decimals = get_decimals(new_distrubuted_reward).unwrap();
+        // let decimals = get_decimals(new_distrubuted_reward).unwrap();
 
-        let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
-            .try_into()
-            .unwrap_or(Uint128::zero());
+        // let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
+        //     .try_into()
+        //     .unwrap_or(Uint128::zero());
 
-        total_rewards.push(rewards_uint128);
-        stakeposition.dec_rewards = decimals;
-        stakeposition.pending_rewards += rewards_uint128;
-        stakeposition.index = state.global_index;
+        // total_rewards.push(rewards_uint128);
+        // stakeposition.dec_rewards = decimals;
+        // stakeposition.pending_rewards += rewards_uint128;
+        // stakeposition.index = state.global_index;
     }
 
     Ok(total_rewards.iter().sum())
@@ -456,7 +458,7 @@ pub fn execute_unbond(
     //update rewards for stakers every position event though only one position is being withdrawn
     update_stakers_rewards(deps, &mut state, env, staker)?;
 
-    //get the index of the position to be withdrawn
+    //get the index of the position to be unbonded
     let searchedPositionIndex = staker
         .iter()
         .position(|stakeposition| stakeposition.unbond_duration == duration);
@@ -468,7 +470,7 @@ pub fn execute_unbond(
     let rewards = staker[searchedPositionIndex.unwrap()].pending_rewards;
 
     //if amount is none withdraw all
-    let withdraw_amount = match amount {
+    let unbond_amount = match amount {
         Some(amount) => {
             if staker[searchedPositionIndex.unwrap()].staked_amount < amount {
                 return Err(ContractError::InsufficientStakedAmount {});
@@ -480,8 +482,9 @@ pub fn execute_unbond(
 
     //create claim
     let claim = Claim {
-        amount: withdraw_amount,
+        amount: unbond_amount,
         release_at: env.block.time.plus_nanos(duration.as_nanos() as u64),
+        unbond_at: env.block.time,
     };
 
     //Load claims and save new one
@@ -490,7 +493,7 @@ pub fn execute_unbond(
     CLAIMS.save(deps.storage, &info.sender, &claims)?;
 
     //update stakeposition
-    staker[searchedPositionIndex.unwrap()].staked_amount -= withdraw_amount;
+    staker[searchedPositionIndex.unwrap()].staked_amount -= unbond_amount;
     staker[searchedPositionIndex.unwrap()].pending_rewards = Uint128::zero();
     staker[searchedPositionIndex.unwrap()].last_claimed = env.block.time;
 
@@ -511,7 +514,7 @@ pub fn execute_unbond(
     let res = Response::new()
         .add_message(reward_message)
         .add_attribute("action", "withdraw")
-        .add_attribute("amount", withdraw_amount.to_string())
+        .add_attribute("amount", unbond_amount.to_string())
         .add_attribute("unbond_time", claim.release_at.to_string())
         .add_attribute("rewards", rewards.to_string());
     Ok(res)
@@ -619,7 +622,7 @@ pub fn execute_claim(
 
 pub fn execute_force_claim(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     unbond_time: Timestamp,
 ) -> Result<Response, ContractError> {
@@ -642,127 +645,155 @@ pub fn execute_force_claim(
     //save new claim vector
     CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
 
-    //TODO : add a force_unbound cut
+    let remaning_time = desired_claim
+        .release_at
+        .minus_nanos(env.block.time.nanos())
+        .nanos();
 
-    let stake_asset = match (&config.stake_denom) {
-        Denom::Native(denom) => Asset::native(denom, desired_claim.amount),
+    let total_unbond_duration = desired_claim
+        .release_at
+        .minus_nanos(desired_claim.unbond_at.nanos())
+        .nanos();
+    //cut_ratio = force_claim_ratio * (remaning_time / total_unbond_duration)
+    let cut_ratio = config
+        .force_claim_ratio
+        .checked_mul(Decimal::from_ratio(remaning_time, total_unbond_duration))?;
 
-        Denom::Cw20(address) => Asset::cw20(*address, desired_claim.amount),
+    //cut_amount = desired_claim.amount * cut_ratio
+    let cut_amount = desired_claim
+        .amount
+        .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
+    //claim_amount = desired_claim.amount - cut_amount
+    let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
+    //send cut_amount to fee_collector
+    let cut_asset = match &config.stake_denom {
+        Denom::Native(denom) => Asset::native(denom, cut_amount),
+
+        Denom::Cw20(address) => Asset::cw20(*address, cut_amount),
     };
-    let asset_message = stake_asset.transfer_msg(info.sender)?;
+    let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
+    //send claim_amount to user
+    let claim_asset = match (&config.stake_denom) {
+        Denom::Native(denom) => Asset::native(denom, claim_amount),
+
+        Denom::Cw20(address) => Asset::cw20(*address, claim_amount),
+    };
+    let claim_message = claim_asset.transfer_msg(info.sender)?;
 
     let res = Response::new()
-        .add_message(asset_message)
+        .add_message(cut_message)
+        .add_message(claim_message)
         .add_attribute("action", "force_claim")
-        .add_attribute("amount", desired_claim.amount.to_string());
+        .add_attribute("amount", claim_amount.to_string())
+        .add_attribute("cut_amount", cut_amount.to_string());
     Ok(res)
 }
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
-        QueryMsg::AccruedRewards { address } => {
-            to_binary(&query_accrued_rewards(env, deps, address)?)
-        }
-        QueryMsg::Holder { address } => to_binary(&query_holder(env, deps, address)?),
-        QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
-        QueryMsg::Holders { start_after, limit } => {
-            to_binary(&query_holders(deps, env, start_after, limit)?)
-        }
-    }
-}
+// #[cfg_attr(not(feature = "library"), entry_point)]
+// pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+//     match msg {
+//         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
+//         QueryMsg::AccruedRewards { address } => {
+//             to_binary(&query_accrued_rewards(env, deps, address)?)
+//         }
+//         QueryMsg::Holder { address } => to_binary(&query_holder(env, deps, address)?),
+//         QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
+//         QueryMsg::Holders { start_after, limit } => {
+//             to_binary(&query_holders(deps, env, start_after, limit)?)
+//         }
+//     }
+// }
 
-pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
-    let state = STATE.load(deps.storage)?;
+// pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
+//     let state = STATE.load(deps.storage)?;
 
-    Ok(StateResponse {
-        total_staked: state.total_staked,
-        global_index: state.global_index,
-        prev_reward_balance: state.prev_reward_balance,
-    })
-}
+//     Ok(StateResponse {
+//         total_staked: state.total_staked,
+//         global_index: state.global_index,
+//         prev_reward_balance: state.prev_reward_balance,
+//     })
+// }
 
-//query config
-pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
-    let config = CONFIG.load(deps.storage)?;
+// //query config
+// pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
+//     let config = CONFIG.load(deps.storage)?;
 
-    Ok(ConfigResponse {
-        staked_token_denom: config.staked_token_denom,
-        reward_denom: config.reward_denom,
-        admin: config.admin.into_string(),
-    })
-}
+//     Ok(ConfigResponse {
+//         staked_token_denom: config.staked_token_denom,
+//         reward_denom: config.reward_denom,
+//         admin: config.admin.into_string(),
+//     })
+// }
 
-pub fn query_accrued_rewards(
-    _env: Env,
-    deps: Deps,
-    address: String,
-) -> StdResult<AccruedRewardsResponse> {
-    let addr = deps.api.addr_validate(&address.as_str())?;
-    let holder = HOLDERS.load(deps.storage, &addr)?;
+// pub fn query_accrued_rewards(
+//     _env: Env,
+//     deps: Deps,
+//     address: String,
+// ) -> StdResult<AccruedRewardsResponse> {
+//     let addr = deps.api.addr_validate(&address.as_str())?;
+//     let holder = HOLDERS.load(deps.storage, &addr)?;
 
-    Ok(AccruedRewardsResponse {
-        rewards: holder.pending_rewards,
-    })
-}
+//     Ok(AccruedRewardsResponse {
+//         rewards: holder.pending_rewards,
+//     })
+// }
 
-pub fn query_holder(_env: Env, deps: Deps, address: String) -> StdResult<HolderResponse> {
-    let holder: Holder = HOLDERS.load(deps.storage, &deps.api.addr_validate(address.as_str())?)?;
-    Ok(HolderResponse {
-        address: address,
-        balance: holder.balance,
-        index: holder.index,
-        pending_rewards: holder.pending_rewards,
-        dec_rewards: holder.dec_rewards,
-    })
-}
+// pub fn query_holder(_env: Env, deps: Deps, address: String) -> StdResult<HolderResponse> {
+//     let holder: Holder = HOLDERS.load(deps.storage, &deps.api.addr_validate(address.as_str())?)?;
+//     Ok(HolderResponse {
+//         address: address,
+//         balance: holder.balance,
+//         index: holder.index,
+//         pending_rewards: holder.pending_rewards,
+//         dec_rewards: holder.dec_rewards,
+//     })
+// }
 
-// calculate the reward with decimal
-pub fn get_decimals(value: Decimal256) -> StdResult<Decimal256> {
-    let stringed: &str = &*value.to_string();
-    let parts: &[&str] = &*stringed.split('.').collect::<Vec<&str>>();
-    match parts.len() {
-        1 => Ok(Decimal256::zero()),
-        2 => {
-            let decimals: Decimal256 = Decimal256::from_str(&*("0.".to_owned() + parts[1]))?;
-            Ok(decimals)
-        }
-        _ => Err(StdError::generic_err("Unexpected number of dots")),
-    }
-}
+// // calculate the reward with decimal
+// pub fn get_decimals(value: Decimal256) -> StdResult<Decimal256> {
+//     let stringed: &str = &*value.to_string();
+//     let parts: &[&str] = &*stringed.split('.').collect::<Vec<&str>>();
+//     match parts.len() {
+//         1 => Ok(Decimal256::zero()),
+//         2 => {
+//             let decimals: Decimal256 = Decimal256::from_str(&*("0.".to_owned() + parts[1]))?;
+//             Ok(decimals)
+//         }
+//         _ => Err(StdError::generic_err("Unexpected number of dots")),
+//     }
+// }
 
-const MAX_LIMIT: u32 = 30;
-const DEFAULT_LIMIT: u32 = 10;
-//query all holders list
-pub fn query_holders(
-    deps: Deps,
-    _env: Env,
-    start_after: Option<String>,
-    limit: Option<u32>,
-) -> StdResult<HoldersResponse> {
-    let addr = maybe_addr(deps.api, start_after)?;
-    let start = addr.as_ref().map(Bound::exclusive);
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let holders: StdResult<Vec<HolderResponse>> = HOLDERS
-        .range(deps.storage, start, None, Order::Ascending)
-        .take(limit)
-        .map(|item| {
-            let (addr, holder) = item?;
-            let holder_response = HolderResponse {
-                address: addr.to_string(),
-                balance: holder.balance,
-                index: holder.index,
-                pending_rewards: holder.pending_rewards,
-                dec_rewards: holder.dec_rewards,
-            };
-            Ok(holder_response)
-        })
-        .collect();
+// const MAX_LIMIT: u32 = 30;
+// const DEFAULT_LIMIT: u32 = 10;
+// //query all holders list
+// pub fn query_holders(
+//     deps: Deps,
+//     _env: Env,
+//     start_after: Option<String>,
+//     limit: Option<u32>,
+// ) -> StdResult<HoldersResponse> {
+//     let addr = maybe_addr(deps.api, start_after)?;
+//     let start = addr.as_ref().map(Bound::exclusive);
+//     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+//     let holders: StdResult<Vec<HolderResponse>> = HOLDERS
+//         .range(deps.storage, start, None, Order::Ascending)
+//         .take(limit)
+//         .map(|item| {
+//             let (addr, holder) = item?;
+//             let holder_response = HolderResponse {
+//                 address: addr.to_string(),
+//                 balance: holder.balance,
+//                 index: holder.index,
+//                 pending_rewards: holder.pending_rewards,
+//                 dec_rewards: holder.dec_rewards,
+//             };
+//             Ok(holder_response)
+//         })
+//         .collect();
 
-    Ok(HoldersResponse { holders: holders? })
-}
+//     Ok(HoldersResponse { holders: holders? })
+// }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
-}
+// #[cfg_attr(not(feature = "library"), entry_point)]
+// pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+//     Ok(Response::default())
+// }
