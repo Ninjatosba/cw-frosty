@@ -235,7 +235,7 @@ pub fn execute_bond(
             let mut staker = vec![staker];
             state.total_weight +=
                 Decimal256::from_str(&(duration.as_nanos() as f64).sqrt().to_string())?;
-            STAKEPOSITIONS.save(deps.storage, &sender, &staker)?;
+            STAKEPOSITIONS.save(deps.storage.clone(), &sender, &staker)?;
         }
         Some(mut staker) => {
             //filter stakeposition vector for given duration
