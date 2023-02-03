@@ -16,13 +16,13 @@ use cw_utils::must_pay;
 use serde::de;
 use std::time::Duration;
 
-use crate::helper;
+use crate::helper::{self, days_to_seconds};
 use crate::msg::{
     AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
 };
 use crate::state::{
-    self, Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKEPOSITIONS, STATE,
+    self, Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -124,12 +124,12 @@ pub fn execute_receive(
         amount: wrapper.amount,
     };
     match msg {
-        ReceiveMsg::Bond { duration } => execute_bond(
+        ReceiveMsg::Bond { duration_day } => execute_bond(
             deps,
             env,
             balance,
             api.addr_validate(&wrapper.sender)?,
-            duration,
+            duration_day,
         ),
         ReceiveMsg::RewardUpdate { duration } => fund_reward(deps, env, balance, duration),
     }
@@ -168,152 +168,106 @@ pub fn fund_reward(
     Ok(res)
 }
 
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn execute_bond(
-//     deps: DepsMut,
-//     env: Env,
-//     amount: Balance,
-//     sender: Addr,
-//     duration: Duration,
-// ) -> Result<Response, ContractError> {
-//     let cfg = CONFIG.load(deps.storage)?;
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute_bond(
+    deps: DepsMut,
+    env: Env,
+    balance: Balance,
+    sender: Addr,
+    duration: u128,
+) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    // check denom
+    if balance.denom != cfg.stake_denom {
+        return Err(ContractError::InvalidCw20TokenAddress {});
+    }
+    let amount = balance.amount;
+    let mut state = STATE.load(deps.storage)?;
+    // look for this address and desired duration in STAKERS
+    let mut staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
+    match staker {
+        Some(mut staker) => {
+            update_reward_index(&mut state, env.block.time);
+            // update_stakers_rewards(deps, env, sender.clone(), staker.bonded_amount, staker.unbonded_amount, staker.unbonded_time, staker.unbonded_duration)?;
+            staker.staked_amount = staker.staked_amount.add(amount);
+            staker.index = state.global_index;
+        }
+        None => {
+            // create new staker
+            update_reward_index(&mut state, env.block.time);
+            let staker = StakePosition {
+                staked_amount: amount,
+                index: state.global_index,
+                bond_time: env.block.time,
+                unbond_duration: Duration::from_secs(days_to_seconds(duration)),
+                pending_rewards: Uint128::zero(),
+                dec_rewards: Decimal256::zero(),
+                last_claimed: env.block.time,
+            };
+            let weight = Decimal256::from_ratio(duration, Uint128::one()).sqrt();
+            state.total_weight = state.total_weight.add(weight);
+            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
+        }
+    }
+    state.total_staked = state.total_staked.add(amount);
+    STATE.save(deps.storage, &state)?;
 
-//     let amount = match (&cfg.stake_denom, &amount) {
-//         (Denom::Cw20(want), Balance::Cw20(have)) => {
-//             if want == &have.address {
-//                 Ok(have.amount)
-//             } else {
-//                 Err(ContractError::DenomNotSupported {})
-//             }
-//         }
-//         (Denom::Native(want), Balance::Native(have)) => {
-//             if have.clone().into_vec().len() != 1 {
-//                 return Err(ContractError::MultipleTokensSent {});
-//             }
-//             if want == &have.clone().into_vec()[0].denom.to_string() {
-//                 Ok(have.clone().into_vec()[0].amount)
-//             } else {
-//                 Err(ContractError::DenomNotSupported {})
-//             }
-//         }
-//         _ => Err(ContractError::DenomNotSupported {}),
-//     }?;
+    let res = Response::new()
+        .add_attribute("action", "bond")
+        .add_attribute("sender", sender)
+        .add_attribute("amount", amount);
 
-//     let mut state = STATE.load(deps.storage)?;
-//     let mut staker = STAKEPOSITIONS.may_load(deps.storage, &sender)?;
+    Ok(res)
+}
 
-//     //Match if any staker in storage else define new staker
+pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
 
-//     match staker {
-//         None => {
-//             update_reward_index(&mut state, cfg, deps, env.clone());
-//             let staker = StakePosition {
-//                 staked_amount: amount,
-//                 pending_rewards: Uint128::zero(),
-//                 index: state.global_index,
-//                 dec_rewards: Decimal256::zero(),
-//                 unbond_duration: duration,
-//                 bond_time: env.clone().block.time,
-//                 last_claimed: env.clone().block.time,
-//             };
-//             let mut staker = vec![staker];
-//             state.total_weight +=
-//                 Decimal256::from_str(&(duration.as_nanos() as f64).sqrt().to_string())?;
-//             STAKEPOSITIONS.save(deps.storage.clone(), &sender, &staker)?;
-//         }
-//         Some(mut staker) => {
-//             //filter stakeposition vector for given duration
-//             if let Some(stakeposition) = staker
-//                 .iter_mut()
-//                 .find(|stakeposition| stakeposition.unbond_duration == duration)
-//             {
-//                 update_reward_index(&mut state, cfg, deps, env)?;
-//                 update_stakers_rewards(deps, &mut state, env, staker)?;
-//                 stakeposition.staked_amount = stakeposition.staked_amount.add(amount);
-//                 stakeposition.index = state.global_index;
-//                 STAKEPOSITIONS.save(deps.storage, &sender, &staker)?;
-//             } else {
-//                 let stakeposition = StakePosition {
-//                     staked_amount: amount,
-//                     pending_rewards: Uint128::zero(),
-//                     index: state.global_index,
-//                     dec_rewards: Decimal256::zero(),
-//                     unbond_duration: duration,
-//                     bond_time: env.block.time,
-//                     last_claimed: env.block.time,
-//                 };
-//                 staker.push(stakeposition);
-//                 STAKEPOSITIONS.save(deps.storage, &sender, &staker)?;
-//                 //Isqrt returns integer we cant use that
-//                 state.total_weight +=
-//                     Decimal256::from_str(&(duration.as_nanos() as f64).sqrt().to_string())?;
-//             }
-//         }
-//     }
+    // Zero staking check
+    if state.total_staked.is_zero() {
+        return Err(ContractError::NoBond {});
+    }
 
-//     state.total_staked = state.total_staked.add(amount);
-//     STATE.save(deps.storage, &state)?;
+    update_reward_index(&mut state, env.block.time);
 
-//     let res = Response::new()
-//         .add_attribute("action", "bond")
-//         .add_attribute("sender", sender)
-//         .add_attribute("amount", amount);
+    STATE.save(deps.storage, &state)?;
 
-//     Ok(res)
-// }
+    let res = Response::new()
+        .add_attribute("action", "update_reward_index")
+        .add_attribute("new_index", state.global_index.to_string());
+    Ok(res)
+}
 
-// pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
-//     let mut state = STATE.load(deps.storage)?;
-//     let config = CONFIG.load(deps.storage)?;
+pub fn update_reward_index(state: &mut State, now: Timestamp) -> Result<(), ContractError> {
+    // Zero staking check
+    if state.total_staked.is_zero() {
+        return Err(ContractError::NoBond {});
+    }
 
-//     // Zero staking check
-//     if state.total_staked.is_zero() {
-//         return Err(ContractError::NoBond {});
-//     }
+    //TODO: Check if denomination is correct
+    let numerator = now.nanos() - state.last_updated.nanos();
+    let denominator = state.reward_end_time.nanos() - state.start_time.nanos();
+    let remaining_ratio = Decimal256::from_ratio(numerator, denominator);
 
-//     update_reward_index(&mut state, config, deps, env)?;
+    let new_dist_balance = state
+        .total_reward_supply
+        .multiply_ratio(numerator, denominator);
+    let total_weight = state.total_weight;
+    // TODO check if its good to use this way
+    let adding_index = Decimal256::from_ratio(
+        state
+            .total_weight
+            .numerator()
+            .checked_mul(state.total_staked.into())?
+            .checked_mul(new_dist_balance.into())?,
+        state.total_weight.denominator(),
+    );
 
-//     let res = Response::new()
-//         .add_attribute("action", "update_reward_index")
-//         .add_attribute("new_index", state.global_index.to_string());
-//     Ok(res)
-// }
-
-// pub fn update_reward_index(
-//     state: &mut State,
-//     config: Config,
-//     deps: DepsMut,
-//     env: Env,
-// ) -> Result<(), ContractError> {
-//     // Zero staking check
-//     if state.total_staked.is_zero() {
-//         return Err(ContractError::NoBond {});
-//     }
-//     let state = STATE.load(deps.storage)?;
-
-//     //TODO: Check if denomination is correct
-//     let numerator = env.block.time.nanos() - state.last_updated.nanos();
-//     let denominator = state.reward_end_time.nanos() - state.start_time.nanos();
-//     let remaining_ratio = Decimal256::from_ratio(numerator, denominator);
-
-//     let new_dist_balance = state
-//         .total_reward_supply
-//         .multiply_ratio(numerator, denominator);
-//     let total_weight = state.total_weight;
-//     // TODO check if its good to use this way
-//     let adding_index = Decimal256::from_ratio(
-//         state
-//             .total_weight
-//             .numerator()
-//             .checked_mul(state.total_staked.into())?
-//             .checked_mul(new_dist_balance.into())?,
-//         state.total_weight.denominator(),
-//     );
-
-//     state.global_index += adding_index;
-//     state.last_updated = env.block.time;
-//     Ok(())
-// }
+    state.global_index += adding_index;
+    state.last_updated = now;
+    Ok(())
+}
 
 // pub fn execute_update_stakers_rewards(
 //     mut deps: DepsMut,

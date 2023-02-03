@@ -26,6 +26,7 @@ pub struct Claim {
 }
 
 pub const STATE: Item<State> = Item::new("state");
+pub const CLAIMS: Map<&Addr, Vec<Claim>> = Map::new("claims");
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
@@ -55,8 +56,7 @@ pub struct StakePosition {
 }
 
 // REWARDS (holder_addr, cw20_addr) -> Holder
-pub const STAKEPOSITIONS: Map<&Addr, Vec<StakePosition>> = Map::new("stakers");
-pub const CLAIMS: Map<&Addr, Vec<Claim>> = Map::new("claims");
+pub const STAKERS: Map<(&Addr, u128), StakePosition> = Map::new("stakers");
 
 impl StakePosition {
     pub fn new(staked_amount: Uint128, bond_time: Timestamp, unbond_duration: Duration) -> Self {

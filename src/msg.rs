@@ -37,9 +37,6 @@ pub enum ExecuteMsg {
     ////////////////////
     /// Staking operations
     ///////////////////
-    Bond {
-        unbonding_duration: Duration,
-    },
     /// Set current reward index to global index
     UnbondStake {
         amount: Option<Uint128>,
@@ -61,7 +58,7 @@ pub enum ExecuteMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    Bond { duration: Duration },
+    Bond { duration_day: u128 },
     RewardUpdate { duration: Duration },
 }
 
