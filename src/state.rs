@@ -37,7 +37,7 @@ pub struct Config {
     pub fee_collector: Addr,
 }
 
-pub struct Balance {
+pub struct CW20Balance {
     pub denom: Addr,
     pub amount: Uint128,
 }

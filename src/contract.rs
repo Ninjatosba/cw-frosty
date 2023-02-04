@@ -22,7 +22,7 @@ use crate::msg::{
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
 };
 use crate::state::{
-    self, Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
+    self, CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -119,7 +119,7 @@ pub fn execute_receive(
     let config = CONFIG.load(deps.storage)?;
     // TODO: check sender any contract that send cw20 token to this contract can execute this function
     let api = deps.api;
-    let balance = Balance {
+    let balance = CW20Balance {
         denom: info.sender,
         amount: wrapper.amount,
     };
@@ -139,7 +139,7 @@ pub fn execute_receive(
 pub fn fund_reward(
     deps: DepsMut,
     env: Env,
-    balance: Balance,
+    balance: CW20Balance,
     duration: Duration,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
@@ -155,12 +155,13 @@ pub fn fund_reward(
 
     state.total_reward_supply = unclaimed_reward + amount;
 
-    state.remaining_reward_supply = unclaimed_reward + amount;
+    state.remaining_reward_supply = state.total_reward_supply;
 
     state.reward_end_time = state
         .reward_end_time
         .plus_nanos(duration.as_nanos().try_into().unwrap());
 
+    state.start_time = env.block.time;
     STATE.save(deps.storage, &state)?;
     //TODO add responses
     let res = Response::new().add_attribute("action", "fund_reward");
@@ -172,7 +173,7 @@ pub fn fund_reward(
 pub fn execute_bond(
     deps: DepsMut,
     env: Env,
-    balance: Balance,
+    balance: CW20Balance,
     sender: Addr,
     duration: u128,
 ) -> Result<Response, ContractError> {
@@ -188,7 +189,7 @@ pub fn execute_bond(
     match staker {
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time);
-            // update_stakers_rewards(deps, env, sender.clone(), staker.bonded_amount, staker.unbonded_amount, staker.unbonded_time, staker.unbonded_duration)?;
+            // update_staker_rewards(deps, env, sender.clone(), staker.bonded_amount, staker.unbonded_amount, staker.unbonded_time, staker.unbonded_duration)?;
             staker.staked_amount = staker.staked_amount.add(amount);
             staker.index = state.global_index;
         }
@@ -239,22 +240,27 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
     Ok(res)
 }
 
-pub fn update_reward_index(state: &mut State, now: Timestamp) -> Result<(), ContractError> {
+pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), ContractError> {
     // Zero staking check
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
     }
 
-    //TODO: Check if denomination is correct
-    let numerator = now.nanos() - state.last_updated.nanos();
-    let denominator = state.reward_end_time.nanos() - state.start_time.nanos();
+    // If now is passed the end time, set it to the end time
+    if now > state.reward_end_time {
+        now = state.reward_end_time;
+    }
+    // Time elapsed since last update
+    let numerator = now.seconds() - state.last_updated.seconds();
+    // Time elapsed since start
+    let denominator = state.reward_end_time.seconds() - state.start_time.seconds();
+
     let remaining_ratio = Decimal256::from_ratio(numerator, denominator);
 
     let new_dist_balance = state
         .total_reward_supply
         .multiply_ratio(numerator, denominator);
-    let total_weight = state.total_weight;
-    // TODO check if its good to use this way
+
     let adding_index = Decimal256::from_ratio(
         state
             .total_weight
@@ -263,13 +269,15 @@ pub fn update_reward_index(state: &mut State, now: Timestamp) -> Result<(), Cont
             .checked_mul(new_dist_balance.into())?,
         state.total_weight.denominator(),
     );
-
-    state.global_index += adding_index;
+    state.remaining_reward_supply = state
+        .remaining_reward_supply
+        .checked_sub(new_dist_balance)?;
+    state.global_index = state.global_index.add(adding_index);
     state.last_updated = now;
     Ok(())
 }
 
-// pub fn execute_update_stakers_rewards(
+// pub fn execute_update_staker_rewards(
 //     mut deps: DepsMut,
 //     env: Env,
 //     info: MessageInfo,
@@ -296,7 +304,7 @@ pub fn update_reward_index(state: &mut State, now: Timestamp) -> Result<(), Cont
 //     Ok(res)
 // }
 
-// pub fn update_stakers_rewards(
+// pub fn update_staker_rewards(
 //     mut deps: DepsMut,
 //     state: &mut State,
 //     env: Env,
