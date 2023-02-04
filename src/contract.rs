@@ -189,7 +189,7 @@ pub fn execute_bond(
     match staker {
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time);
-            update_staker_rewards(&mut state, env, &mut staker)?;
+            update_staker_rewards(&mut state, env.block.time, &mut staker)?;
             staker.staked_amount = staker.staked_amount.add(amount);
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
@@ -266,42 +266,48 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     Ok(())
 }
 
-// pub fn execute_update_staker_rewards(
-//     mut deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     address: Option<String>,
-// ) -> Result<Response, ContractError> {
-//     let mut state = STATE.load(deps.storage)?;
+pub fn execute_update_staker_rewards(
+    mut deps: DepsMut,
+    mut env: Env,
+    info: MessageInfo,
+    address: Option<String>,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let addr = maybe_addr(deps.api, address)?.unwrap_or_else(|| info.sender.clone());
+    // Zero staking check
+    if state.total_staked.is_zero() {
+        return Err(ContractError::NoBond {});
+    }
+    // TODO: Check is its OK
+    let mut positions: Vec<StakePosition> = STAKERS
+        .prefix(&info.sender)
+        .range(deps.storage, None, None, Order::Ascending)
+        .map(|item| item.unwrap().1)
+        .collect();
+    let mut rewards = vec![];
+    positions.iter().map(|mut position| {
+        update_staker_rewards(&mut state, env.block.time, &mut position);
+        rewards.push(position.pending_rewards);
+    });
 
-//     // Zero staking check
-//     if state.total_staked.is_zero() {
-//         return Err(ContractError::NoBond {});
-//     }
-//     //validate address
-//     let addr = maybe_addr(deps.api, address)?.unwrap_or(info.sender);
-//     let mut staker = STAKEPOSITIONS.load(deps.storage, &Addr::unchecked(addr.clone()))?;
-//     let rewards = update_stakers_rewards(deps.branch(), &mut state, env, staker)?;
-
-//     STATE.save(deps.storage, &state)?;
-//     STAKEPOSITIONS.save(deps.storage, &Addr::unchecked(addr.clone()), &staker)?;
-
-//     let res = Response::new()
-//         .add_attribute("action", "update_stakers_rewards")
-//         .add_attribute("address", addr)
-//         .add_attribute("rewards", rewards);
-//     Ok(res)
-// }
+    let summed_rewards: Uint128 = rewards.iter().sum();
+    let res = Response::new()
+        .add_attribute("action", "update_stakers_rewards")
+        .add_attribute("address", addr)
+        .add_attribute("rewards", summed_rewards.to_string());
+    Ok(res)˜
+}
 
 pub fn update_staker_rewards(
     state: &mut State,
-    env: Env,
+    mut now: Timestamp,
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
     //update reward index
-    update_reward_index(state, env.block.time)?;
+    update_reward_index(state, now)?;
 
     let mut total_rewards: Vec<Uint128> = vec![];
+
     let position_weight =
         Decimal256::from_ratio(stake_position.unbond_duration_as_days, Uint128::one()).sqrt();
 
@@ -327,7 +333,7 @@ pub fn update_staker_rewards(
         .pending_rewards
         .checked_add(rewards_uint128)?;
     stake_position.index = state.global_index;
-
+    stake_position.last_claimed = now;
     Ok(total_rewards.iter().sum())
 }
 
