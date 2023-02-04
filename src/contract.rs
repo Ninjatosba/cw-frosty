@@ -16,7 +16,7 @@ use cw_utils::must_pay;
 use serde::de;
 use std::time::Duration;
 
-use crate::helper::{self, days_to_seconds};
+use crate::helper::{self, days_to_seconds, get_decimals};
 use crate::msg::{
     AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
     InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
@@ -189,9 +189,9 @@ pub fn execute_bond(
     match staker {
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time);
-            // update_staker_rewards(deps, env, sender.clone(), staker.bonded_amount, staker.unbonded_amount, staker.unbonded_time, staker.unbonded_duration)?;
+            update_staker_rewards(&mut state, env, &mut staker)?;
             staker.staked_amount = staker.staked_amount.add(amount);
-            staker.index = state.global_index;
+            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
         None => {
             // create new staker
@@ -200,7 +200,7 @@ pub fn execute_bond(
                 staked_amount: amount,
                 index: state.global_index,
                 bond_time: env.block.time,
-                unbond_duration: Duration::from_secs(days_to_seconds(duration)),
+                unbond_duration_as_days: duration,
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),
                 last_claimed: env.block.time,
@@ -223,14 +223,13 @@ pub fn execute_bond(
 
 pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
-    let config = CONFIG.load(deps.storage)?;
 
     // Zero staking check
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
     }
 
-    update_reward_index(&mut state, env.block.time);
+    update_reward_index(&mut state, env.block.time)?;
 
     STATE.save(deps.storage, &state)?;
 
@@ -241,37 +240,27 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
 }
 
 pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), ContractError> {
-    // Zero staking check
-    if state.total_staked.is_zero() {
-        return Err(ContractError::NoBond {});
-    }
-
     // If now is passed the end time, set it to the end time
     if now > state.reward_end_time {
         now = state.reward_end_time;
     }
     // Time elapsed since last update
-    let numerator = now.seconds() - state.last_updated.seconds();
+    let numerator = now.minus_seconds(state.last_updated.seconds()).seconds();
     // Time elapsed since start
     let denominator = state.reward_end_time.seconds() - state.start_time.seconds();
-
-    let remaining_ratio = Decimal256::from_ratio(numerator, denominator);
 
     let new_dist_balance = state
         .total_reward_supply
         .multiply_ratio(numerator, denominator);
 
-    let adding_index = Decimal256::from_ratio(
-        state
-            .total_weight
-            .numerator()
-            .checked_mul(state.total_staked.into())?
-            .checked_mul(new_dist_balance.into())?,
-        state.total_weight.denominator(),
-    );
-    state.remaining_reward_supply = state
-        .remaining_reward_supply
-        .checked_sub(new_dist_balance)?;
+    let divider = state
+        .total_weight
+        .checked_mul(Decimal256::from_ratio(state.total_staked, Uint256::one()))?;
+
+    let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
+        .checked_div(divider)
+        .unwrap_or(Decimal256::zero());
+
     state.global_index = state.global_index.add(adding_index);
     state.last_updated = now;
     Ok(())
@@ -304,49 +293,43 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
 //     Ok(res)
 // }
 
-// pub fn update_staker_rewards(
-//     mut deps: DepsMut,
-//     state: &mut State,
-//     env: Env,
-//     staker: Vec<StakePosition>,
-// ) -> Result<Uint128, ContractError> {
-//     let config = CONFIG.load(deps.storage)?;
+pub fn update_staker_rewards(
+    state: &mut State,
+    env: Env,
+    stake_position: &mut StakePosition,
+) -> Result<Uint128, ContractError> {
+    //update reward index
+    update_reward_index(state, env.block.time)?;
 
-//     //update reward index
-//     update_reward_index(state, config, deps.branch(), env)?;
+    let mut total_rewards: Vec<Uint128> = vec![];
+    let position_weight =
+        Decimal256::from_ratio(stake_position.unbond_duration_as_days, Uint128::one()).sqrt();
 
-//     let mut total_rewards: Vec<Uint128> = vec![];
+    let index_diff = state.global_index - stake_position.index;
 
-//     for mut stakeposition in staker {
-//         let position_weight = Decimal256::from_str(
-//             &(stakeposition.unbond_duration.as_nanos() as f64)
-//                 .sqrt()
-//                 .to_string(),
-//         )?;
-//         let index_diff = state.global_index - stakeposition.index;
+    let multiplier = index_diff.checked_mul(position_weight)?;
 
-//         let multiplier = index_diff.checked_mul(position_weight).unwrap();
+    let new_distrubuted_reward =
+        Decimal256::from_ratio(stake_position.staked_amount, Uint128::one())
+            .checked_mul(multiplier)?
+            .checked_add(stake_position.dec_rewards)?;
 
-//         // let new_distrubuted_reward = (multiplier
-//         //     .checked_mul(Decimal256::from_ratio(stakeposition.staked_amount, 1)))
-//         // .unwrap()
-//         // .checked_add(stakeposition.dec_rewards)
-//         // .unwrap();
+    let decimals = get_decimals(new_distrubuted_reward)?;
 
-//         // let decimals = get_decimals(new_distrubuted_reward).unwrap();
+    let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
+        .try_into()
+        .unwrap_or(Uint128::zero());
 
-//         // let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
-//         //     .try_into()
-//         //     .unwrap_or(Uint128::zero());
+    total_rewards.push(rewards_uint128);
 
-//         // total_rewards.push(rewards_uint128);
-//         // stakeposition.dec_rewards = decimals;
-//         // stakeposition.pending_rewards += rewards_uint128;
-//         // stakeposition.index = state.global_index;
-//     }
+    stake_position.dec_rewards = decimals;
+    stake_position.pending_rewards = stake_position
+        .pending_rewards
+        .checked_add(rewards_uint128)?;
+    stake_position.index = state.global_index;
 
-//     Ok(total_rewards.iter().sum())
-// }
+    Ok(total_rewards.iter().sum())
+}
 
 // pub fn execute_receive_reward(
 //     mut deps: DepsMut,
@@ -692,20 +675,6 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
 // //         pending_rewards: holder.pending_rewards,
 // //         dec_rewards: holder.dec_rewards,
 // //     })
-// // }
-
-// // // calculate the reward with decimal
-// // pub fn get_decimals(value: Decimal256) -> StdResult<Decimal256> {
-// //     let stringed: &str = &*value.to_string();
-// //     let parts: &[&str] = &*stringed.split('.').collect::<Vec<&str>>();
-// //     match parts.len() {
-// //         1 => Ok(Decimal256::zero()),
-// //         2 => {
-// //             let decimals: Decimal256 = Decimal256::from_str(&*("0.".to_owned() + parts[1]))?;
-// //             Ok(decimals)
-// //         }
-// //         _ => Err(StdError::generic_err("Unexpected number of dots")),
-// //     }
 // // }
 
 // // const MAX_LIMIT: u32 = 30;
