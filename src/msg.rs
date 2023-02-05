@@ -24,23 +24,15 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     /// Update the reward index
     UpdateRewardIndex {},
-
-    FundReward {
-        end_time: Duration,
-    },
     ForceClaim {
         unbond_time: Timestamp,
     },
     UpdateStakersReward {
         address: Option<String>,
     },
-    ////////////////////
-    /// Staking operations
-    ///////////////////
-    /// Set current reward index to global index
     UnbondStake {
         amount: Option<Uint128>,
-        duration: Duration,
+        duration: u128,
     },
 
     ClaimUnbounded {},
@@ -49,9 +41,10 @@ pub enum ExecuteMsg {
 
     //Update config
     UpdateConfig {
-        staked_token_denom: Option<Addr>,
-        reward_denom: Option<Addr>,
+        staked_token_denom: Option<String>,
+        reward_denom: Option<String>,
         admin: Option<String>,
+        fee_collector: Option<String>,
     },
 }
 

@@ -71,42 +71,41 @@ pub fn instantiate(
     Ok(res)
 }
 
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn execute(
-//     deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     msg: ExecuteMsg,
-// ) -> Result<Response, ContractError> {
-//     match msg {
-//         ExecuteMsg::FundReward { end_time } => {
-//             fund_reward(deps, env, Balance::from(info.funds), end_time)
-//         }
-//         ExecuteMsg::Receive(receive_message) => execute_receive(deps, env, info, receive_message),
-//         ExecuteMsg::Bond { unbonding_duration } => execute_bond(
-//             deps,
-//             env,
-//             Balance::from(info.funds),
-//             info.sender,
-//             unbonding_duration,
-//         ),
-//         ExecuteMsg::UpdateRewardIndex {} => execute_update_reward_index(deps, env),
-//         ExecuteMsg::UpdateStakersReward { address } => {
-//             execute_update_stakers_rewards(deps, env, info, address)
-//         }
-//         ExecuteMsg::UnbondStake { amount, duration } => {
-//             execute_unbond(deps, env, info, amount, duration)
-//         }
-//         ExecuteMsg::ClaimUnbounded {} => execute_claim(deps, env, info),
-//         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
-//         ExecuteMsg::UpdateConfig {
-//             staked_token_denom,
-//             reward_denom,
-//             admin,
-//         } => execute_update_config(deps, env, info, staked_token_denom, reward_denom, admin),
-//         ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
-//     }
-// }
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
+    match msg {
+        ExecuteMsg::Receive(receive_message) => execute_receive(deps, env, info, receive_message),
+        ExecuteMsg::UpdateRewardIndex {} => execute_update_reward_index(deps, env),
+        ExecuteMsg::UpdateStakersReward { address } => {
+            execute_update_staker_rewards(deps, env, info, address)
+        }
+        ExecuteMsg::UnbondStake { amount, duration } => {
+            execute_unbond(deps, env, info, amount, duration)
+        }
+        ExecuteMsg::ClaimUnbounded {} => execute_claim(deps, env, info),
+        ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
+        ExecuteMsg::UpdateConfig {
+            staked_token_denom,
+            reward_denom,
+            admin,
+            fee_collector,
+        } => execute_update_config(
+            deps,
+            env,
+            info,
+            staked_token_denom,
+            reward_denom,
+            fee_collector,
+            admin,
+        ),
+        ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
+    }
+}
 
 // /// Increase global_index according to claimed rewards amount
 #[cfg_attr(not(feature = "library"), entry_point)]
