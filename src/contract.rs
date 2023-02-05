@@ -261,13 +261,16 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
 
+    state.remaining_reward_supply = state
+        .remaining_reward_supply
+        .checked_sub(new_dist_balance)?;
     state.global_index = state.global_index.add(adding_index);
     state.last_updated = now;
     Ok(())
 }
 
 pub fn execute_update_staker_rewards(
-    mut deps: DepsMut,
+    deps: DepsMut,
     mut env: Env,
     info: MessageInfo,
     address: Option<String>,
@@ -279,34 +282,38 @@ pub fn execute_update_staker_rewards(
         return Err(ContractError::NoBond {});
     }
     // TODO: Check is its OK
-    let mut positions: Vec<StakePosition> = STAKERS
-        .prefix(&info.sender)
+    let rewards: Uint128 = STAKERS
         .range(deps.storage, None, None, Order::Ascending)
-        .map(|item| item.unwrap().1)
-        .collect();
-    let mut rewards = vec![];
-    positions.iter().map(|mut position| {
-        update_staker_rewards(&mut state, env.block.time, &mut position);
-        rewards.push(position.pending_rewards);
-    });
+        .collect::<StdResult<Vec<_>>>()?
+        .into_iter()
+        .map(|(_, mut staker)| {
+            let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)
+                .unwrap_or(Uint128::zero());
+            STAKERS
+                .save(
+                    deps.storage,
+                    (&addr, staker.unbond_duration_as_days),
+                    &staker,
+                )
+                .unwrap_or_default();
+            reward
+        })
+        .sum();
 
-    let summed_rewards: Uint128 = rewards.iter().sum();
     let res = Response::new()
         .add_attribute("action", "update_stakers_rewards")
         .add_attribute("address", addr)
-        .add_attribute("rewards", summed_rewards.to_string());
-    Ok(res)˜
+        .add_attribute("rewards", rewards.to_string());
+    Ok(res)
 }
 
 pub fn update_staker_rewards(
     state: &mut State,
-    mut now: Timestamp,
+    now: Timestamp,
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
     //update reward index
     update_reward_index(state, now)?;
-
-    let mut total_rewards: Vec<Uint128> = vec![];
 
     let position_weight =
         Decimal256::from_ratio(stake_position.unbond_duration_as_days, Uint128::one()).sqrt();
@@ -326,54 +333,50 @@ pub fn update_staker_rewards(
         .try_into()
         .unwrap_or(Uint128::zero());
 
-    total_rewards.push(rewards_uint128);
-
     stake_position.dec_rewards = decimals;
     stake_position.pending_rewards = stake_position
         .pending_rewards
         .checked_add(rewards_uint128)?;
     stake_position.index = state.global_index;
     stake_position.last_claimed = now;
-    Ok(total_rewards.iter().sum())
+    Ok(rewards_uint128)
 }
 
-// pub fn execute_receive_reward(
-//     mut deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-// ) -> Result<Response, ContractError> {
-//     let mut state = STATE.load(deps.storage)?;
-//     let config = CONFIG.load(deps.storage)?;
+pub fn execute_receive_reward(
+    mut deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
 
-//     let staker = STAKEPOSITIONS.load(deps.storage, &info.sender)?;
-//     if staker.is_empty() {
-//         return Err(ContractError::NoBond {});
-//     }
+    let rewards: Uint128 = STAKERS
+        .range(deps.storage, None, None, Order::Ascending)
+        .collect::<StdResult<Vec<_>>>()?
+        .into_iter()
+        .map(|(_, mut staker)| {
+            let reward = update_staker_rewards(&mut state, env.block.time, &mut staker).unwrap();
+            staker.pending_rewards = Uint128::zero();
+            STAKERS
+                .save(
+                    deps.storage,
+                    (&info.sender, staker.unbond_duration_as_days),
+                    &staker,
+                )
+                .unwrap_or_default();
+            reward
+        })
+        .sum();
 
-//     let rewards = update_stakers_rewards(deps, &mut state, env, staker)?;
-
-//     //iter every stakeposition and update pending to zero
-//     for mut stakeposition in staker {
-//         stakeposition.pending_rewards = Uint128::zero();
-//     }
-
-//     STAKEPOSITIONS.save(deps.storage, &info.sender, &staker)?;
-
-//     //match config.denom to Native or cw20
-
-//     let asset = match (&config.reward_denom) {
-//         Denom::Native(denom) => Asset::native(denom, rewards),
-
-//         Denom::Cw20(address) => Asset::cw20(*address, rewards),
-//     };
-//     let msg = asset.transfer_msg(info.sender)?;
-
-//     let res = Response::new()
-//         .add_message(msg)
-//         .add_attribute("action", "receive_reward")
-//         .add_attribute("rewards", rewards.to_string());
-//     Ok(res)
-// }
+    let reward_asset = Asset::cw20(config.reward_denom, rewards);
+    let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
+    let res = Response::new()
+        .add_message(reward_msg)
+        .add_attribute("action", "receive_reward")
+        .add_attribute("address", info.sender)
+        .add_attribute("rewards", rewards.to_string());
+    Ok(res)
+}
 
 // pub fn execute_unbond(
 //     mut deps: DepsMut,
