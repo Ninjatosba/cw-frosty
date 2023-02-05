@@ -15,6 +15,7 @@ use cw_utils::must_pay;
 
 use serde::de;
 use std::time::Duration;
+use std::vec;
 
 use crate::helper::{self, days_to_seconds, get_decimals};
 use crate::msg::{
@@ -378,185 +379,132 @@ pub fn execute_receive_reward(
     Ok(res)
 }
 
-// pub fn execute_unbond(
-//     mut deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     amount: Option<Uint128>,
-//     duration: Duration,
-// ) -> Result<Response, ContractError> {
-//     let mut state = STATE.load(deps.storage)?;
-//     let config = CONFIG.load(deps.storage)?;
+pub fn execute_unbond(
+    mut deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    amount: Option<Uint128>,
+    duration: u128,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
+    // TODO return error if no position found
+    let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
 
-//     let mut staker = STAKEPOSITIONS.load(deps.storage, &info.sender)?;
+    let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)?;
 
-//     if staker.is_empty() {
-//         return Err(ContractError::NoBond {});
-//     }
-//     //update rewards for stakers every position event though only one position is being withdrawn
-//     update_stakers_rewards(deps, &mut state, env, staker)?;
+    staker.pending_rewards = Uint128::zero();
 
-//     //get the index of the position to be unbonded
-//     let searchedPositionIndex = staker
-//         .iter()
-//         .position(|stakeposition| stakeposition.unbond_duration == duration);
-//     //If no position found return error
-//     if searchedPositionIndex.is_none() {
-//         return Err(ContractError::NoBondForThisDuration {});
-//     }
+    STAKERS.save(deps.storage, (&info.sender, duration), &staker)?;
 
-//     let rewards = staker[searchedPositionIndex.unwrap()].pending_rewards;
+    let unbond_amount = match amount {
+        Some(amount) => {
+            if staker.staked_amount < amount {
+                return Err(ContractError::InsufficientStakedAmount {});
+            }
+            staker.staked_amount = staker.staked_amount.checked_sub(amount)?;
+            STAKERS.save(deps.storage, (&info.sender, duration), &staker);
+            amount
+        }
+        None => {
+            STAKERS.remove(deps.storage, (&info.sender, duration));
+            staker.staked_amount
+        }
+    };
+    let duration_as_sec = days_to_seconds(duration);
 
-//     //if amount is none withdraw all
-//     let unbond_amount = match amount {
-//         Some(amount) => {
-//             if staker[searchedPositionIndex.unwrap()].staked_amount < amount {
-//                 return Err(ContractError::InsufficientStakedAmount {});
-//             }
-//             amount
-//         }
-//         None => staker[searchedPositionIndex.unwrap()].staked_amount,
-//     };
+    let claim = vec![Claim {
+        amount: unbond_amount,
+        release_at: env.block.time.plus_seconds(duration_as_sec),
+        unbond_at: env.block.time,
+    }];
+    CLAIMS.save(deps.storage, &info.sender, &claim)?;
 
-//     //create claim
-//     let claim = Claim {
-//         amount: unbond_amount,
-//         release_at: env.block.time.plus_nanos(duration.as_nanos() as u64),
-//         unbond_at: env.block.time,
-//     };
+    let reward_asset = Asset::cw20(config.reward_denom, reward);
+    let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
-//     //Load claims and save new one
-//     let mut claims = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
-//     claims.push(claim);
-//     CLAIMS.save(deps.storage, &info.sender, &claims)?;
+    let res = Response::new()
+        .add_message(reward_msg)
+        .add_attribute("action", "unbond")
+        .add_attribute("address", info.sender)
+        .add_attribute("amount", amount.unwrap_or_default().to_string())
+        .add_attribute("duration", duration.to_string());
 
-//     //update stakeposition
-//     staker[searchedPositionIndex.unwrap()].staked_amount -= unbond_amount;
-//     staker[searchedPositionIndex.unwrap()].pending_rewards = Uint128::zero();
-//     staker[searchedPositionIndex.unwrap()].last_claimed = env.block.time;
+    Ok(res)
+}
+//update config
+pub fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    stake_denom: Option<String>,
+    reward_denom: Option<String>,
+    fee_collector: Option<String>,
+    admin: Option<String>,
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
+    if info.sender != config.admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    if let Some(stake_denom) = stake_denom {
+        config.stake_denom = deps.api.addr_validate(&stake_denom)?;
+    }
+    if let Some(reward_denom) = reward_denom {
+        config.reward_denom = deps.api.addr_validate(&reward_denom)?;
+    }
+    if let Some(fee_collector) = fee_collector {
+        config.fee_collector = deps.api.addr_validate(&fee_collector)?;
+    }
+    if let Some(admin) = admin {
+        config.admin = deps.api.addr_validate(&admin)?;
+    }
+    CONFIG.save(deps.storage, &config)?;
+    Ok(Response::default())
+}
 
-//     //if stakeposition.stakedamount is zero remove it
-//     if staker[searchedPositionIndex.unwrap()].staked_amount == Uint128::zero() {
-//         staker.remove(searchedPositionIndex.unwrap());
-//     }
+pub fn execute_claim(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    let config = CONFIG.load(deps.storage)?;
+    if claim.is_empty() {
+        return Err(ContractError::NoClaim {});
+    }
+    //filter claim vector and make another vector which contains only mature claims
+    let mature_claims: Vec<Claim> = claim
+        .clone()
+        .into_iter()
+        .filter(|claim| claim.release_at <= env.block.time)
+        .collect();
+    //if no mature claims return error
+    if mature_claims.is_empty() {
+        return Err(ContractError::WaitUnbonding {});
+    }
+    //sum mature claims
+    let mut total_claim: Uint128 = Uint128::zero();
+    for claim in mature_claims.iter() {
+        total_claim += claim.amount;
+    }
+    //remove mature claims from claim vector
+    let mut new_claims: Vec<Claim> = claim
+        .into_iter()
+        .filter(|claim| claim.release_at > env.block.time)
+        .collect();
 
-//     STAKEPOSITIONS.save(deps.storage, &info.sender, &staker)?;
+    //save new claim vector
+    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
 
-//     let reward_asset = match (&config.reward_denom) {
-//         Denom::Native(denom) => Asset::native(denom, rewards),
+    let stake_asset = Asset::cw20(config.stake_denom, total_claim);
+    let asset_message = stake_asset.transfer_msg(info.sender)?;
 
-//         Denom::Cw20(address) => Asset::cw20(*address, rewards),
-//     };
-//     let reward_message = reward_asset.transfer_msg(info.sender)?;
-
-//     let res = Response::new()
-//         .add_message(reward_message)
-//         .add_attribute("action", "withdraw")
-//         .add_attribute("amount", unbond_amount.to_string())
-//         .add_attribute("unbond_time", claim.release_at.to_string())
-//         .add_attribute("rewards", rewards.to_string());
-//     Ok(res)
-// }
-// //update config
-// pub fn execute_update_config(
-//     deps: DepsMut,
-//     _env: Env,
-//     info: MessageInfo,
-//     stake_denom: Option<Denom>,
-//     reward_denom: Option<Denom>,
-//     admin: Option<String>,
-// ) -> Result<Response, ContractError> {
-//     let mut config = CONFIG.load(deps.storage)?;
-
-//     if info.sender != config.admin {
-//         return Err(ContractError::Unauthorized {});
-//     }
-
-//     if let Some(stake_denom) = stake_denom {
-//         config.stake_denom = stake_denom;
-//     }
-
-//     if let Some(reward_denom) = reward_denom {
-//         config.reward_denom = reward_denom;
-//     }
-
-//     if let Some(admin) = admin {
-//         config.admin = deps.api.addr_validate(&admin)?;
-//     }
-
-//     CONFIG.save(deps.storage, &config)?;
-//     //TODO find more elegant way
-
-//     let mut res = Response::new();
-//     res.add_attribute("action", "update_config");
-//     //check stake denom if its native or cw20 the give response with respect ot that
-//     match &config.stake_denom {
-//         Denom::Native(denom) => {
-//             res.add_attribute("stake_denom", denom);
-//         }
-//         Denom::Cw20(address) => {
-//             res.add_attribute("stake_denom", address.to_string());
-//         }
-//     }
-//     //check reward denom if its native or cw20 the give response with respect ot that
-//     match &config.reward_denom {
-//         Denom::Native(denom) => {
-//             res.add_attribute("reward_denom", denom);
-//         }
-//         Denom::Cw20(address) => {
-//             res.add_attribute("reward_denom", address.to_string());
-//         }
-//     }
-//     res.add_attribute("admin", config.admin.to_string());
-
-//     Ok(res)
-// }
-
-// pub fn execute_claim(
-//     deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-// ) -> Result<Response, ContractError> {
-//     let claim = CLAIMS.load(deps.storage, &info.sender)?;
-//     let config = CONFIG.load(deps.storage)?;
-//     if claim.is_empty() {
-//         return Err(ContractError::NoClaim {});
-//     }
-//     //filter claim vector and make another vector which contains only mature claims
-//     let mature_claims: Vec<Claim> = claim
-//         .into_iter()
-//         .filter(|claim| claim.release_at <= env.block.time)
-//         .collect();
-//     //if no mature claims return error
-//     if mature_claims.is_empty() {
-//         return Err(ContractError::WaitUnbonding {});
-//     }
-//     //sum mature claims
-//     let mut total_claim: Uint128 = Uint128::zero();
-//     for claim in mature_claims.iter() {
-//         total_claim += claim.amount;
-//     }
-//     //remove mature claims from claim vector
-//     let mut new_claims: Vec<Claim> = claim
-//         .into_iter()
-//         .filter(|claim| claim.release_at > env.block.time)
-//         .collect();
-//     //save new claim vector
-//     CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
-
-//     let stake_asset = match (&config.stake_denom) {
-//         Denom::Native(denom) => Asset::native(denom, total_claim),
-
-//         Denom::Cw20(address) => Asset::cw20(*address, total_claim),
-//     };
-//     let asset_message = stake_asset.transfer_msg(info.sender)?;
-
-//     let res = Response::new()
-//         .add_message(asset_message)
-//         .add_attribute("action", "claim")
-//         .add_attribute("amount", total_claim.to_string());
-//     Ok(res)
-// }
+    let res = Response::new()
+        .add_message(asset_message)
+        .add_attribute("action", "claim")
+        .add_attribute("amount", total_claim.to_string());
+    Ok(res)
+}
 
 // pub fn execute_force_claim(
 //     deps: DepsMut,
