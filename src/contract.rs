@@ -506,74 +506,67 @@ pub fn execute_claim(
     Ok(res)
 }
 
-// pub fn execute_force_claim(
-//     deps: DepsMut,
-//     env: Env,
-//     info: MessageInfo,
-//     unbond_time: Timestamp,
-// ) -> Result<Response, ContractError> {
-//     let config = CONFIG.load(deps.storage)?;
-//     let claim = CLAIMS.load(deps.storage, &info.sender)?;
-//     if claim.is_empty() {
-//         return Err(ContractError::NoClaim {});
-//     }
-//     //find desired claim if not found return error
-//     let desired_claim: Claim = claim
-//         .into_iter()
-//         .find(|claim| claim.release_at == unbond_time)
-//         .ok_or(ContractError::NoClaimForTimestamp {})?;
+pub fn execute_force_claim(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    release_at: Timestamp,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    if claim.is_empty() {
+        return Err(ContractError::NoClaim {});
+    }
+    //find desired claim if not found return error
+    let desired_claim: Claim = claim
+        .clone()
+        .into_iter()
+        .find(|claim| claim.release_at == release_at)
+        .ok_or(ContractError::NoClaimForTimestamp {})?;
 
-//     //remove desired claim from claim vector
-//     let mut new_claims: Vec<Claim> = claim
-//         .into_iter()
-//         .filter(|claim| claim.release_at != unbond_time)
-//         .collect();
-//     //save new claim vector
-//     CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+    //remove desired claim from claim vector
+    let mut new_claims: Vec<Claim> = claim
+        .clone()
+        .into_iter()
+        .filter(|claim| claim.release_at != release_at)
+        .collect();
+    //save new claim vector
+    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
 
-//     let remaning_time = desired_claim
-//         .release_at
-//         .minus_nanos(env.block.time.nanos())
-//         .nanos();
+    let remaning_time = desired_claim
+        .release_at
+        .minus_seconds(env.block.time.seconds())
+        .seconds();
 
-//     let total_unbond_duration = desired_claim
-//         .release_at
-//         .minus_nanos(desired_claim.unbond_at.nanos())
-//         .nanos();
-//     //cut_ratio = force_claim_ratio * (remaning_time / total_unbond_duration)
-//     let cut_ratio = config
-//         .force_claim_ratio
-//         .checked_mul(Decimal::from_ratio(remaning_time, total_unbond_duration))?;
+    let total_unbond_duration = desired_claim
+        .release_at
+        .minus_seconds(desired_claim.unbond_at.seconds())
+        .seconds();
+    //cut_ratio = force_claim_ratio * (remaning_time / total_unbond_duration)
+    let cut_ratio = config
+        .force_claim_ratio
+        .checked_mul(Decimal::from_ratio(remaning_time, total_unbond_duration))?;
+    //cut_amount = desired_claim.amount * cut_ratio
+    let cut_amount = desired_claim
+        .amount
+        .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
+    //claim_amount = desired_claim.amount - cut_amount
+    let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
+    //send cut_amount to fee_collector
+    let cut_asset = Asset::cw20(config.stake_denom.clone(), cut_amount);
+    let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
+    //send claim_amount to user
+    let claim_asset = Asset::cw20(config.stake_denom.clone(), claim_amount);
+    let claim_message = claim_asset.transfer_msg(info.sender)?;
 
-//     //cut_amount = desired_claim.amount * cut_ratio
-//     let cut_amount = desired_claim
-//         .amount
-//         .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
-//     //claim_amount = desired_claim.amount - cut_amount
-//     let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
-//     //send cut_amount to fee_collector
-//     let cut_asset = match &config.stake_denom {
-//         Denom::Native(denom) => Asset::native(denom, cut_amount),
-
-//         Denom::Cw20(address) => Asset::cw20(*address, cut_amount),
-//     };
-//     let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
-//     //send claim_amount to user
-//     let claim_asset = match (&config.stake_denom) {
-//         Denom::Native(denom) => Asset::native(denom, claim_amount),
-
-//         Denom::Cw20(address) => Asset::cw20(*address, claim_amount),
-//     };
-//     let claim_message = claim_asset.transfer_msg(info.sender)?;
-
-//     let res = Response::new()
-//         .add_message(cut_message)
-//         .add_message(claim_message)
-//         .add_attribute("action", "force_claim")
-//         .add_attribute("amount", claim_amount.to_string())
-//         .add_attribute("cut_amount", cut_amount.to_string());
-//     Ok(res)
-// }
+    let res = Response::new()
+        .add_message(cut_message)
+        .add_message(claim_message)
+        .add_attribute("action", "force_claim")
+        .add_attribute("amount", claim_amount.to_string())
+        .add_attribute("cut_amount", cut_amount.to_string());
+    Ok(res)
+}
 // // #[cfg_attr(not(feature = "library"), entry_point)]
 // // pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 // //     match msg {
