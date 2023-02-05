@@ -1,0 +1,1 @@
+05735bd778c7ed4896186e82b306813c8e74ba180b1dfa746e72a126a662596d  ./target/wasm32-unknown-unknown/release/cw_share.wasm

@@ -1,10 +1,9 @@
-use cosmwasm_std::testing::MockQuerier;
-use cosmwasm_std::{
-    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Decimal256, Deps,
-    DepsMut, Env, Fraction, Isqrt, MessageInfo, Order, Response, StdError, StdResult, Timestamp,
-    Uint128, Uint256,
-};
 use cosmwasm_std::{from_slice, Api};
+use cosmwasm_std::{
+    to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Decimal256, Deps, DepsMut, Env,
+    Fraction, Isqrt, MessageInfo, Order, Response, StdError, StdResult, Timestamp, Uint128,
+    Uint256,
+};
 use cw0::{maybe_addr, PaymentError};
 use cw20::{Cw20CoinVerified, Cw20Contract};
 use cw20::{Cw20QueryMsg, Cw20ReceiveMsg};
@@ -30,7 +29,9 @@ use cosmwasm_std;
 use std::convert::TryInto;
 use std::ops::Add;
 use std::str::FromStr;
-#[cfg_attr(not(feature = "library"), entry_point)]
+
+#[cfg(not(feature = "library"))]
+use cosmwasm_std::entry_point;
 pub fn instantiate(
     deps: DepsMut,
     env: Env,
@@ -71,7 +72,8 @@ pub fn instantiate(
     Ok(res)
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[cfg(not(feature = "library"))]
+
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -108,7 +110,6 @@ pub fn execute(
 }
 
 // /// Increase global_index according to claimed rewards amount
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute_receive(
     deps: DepsMut,
     env: Env,
@@ -134,8 +135,6 @@ pub fn execute_receive(
         ReceiveMsg::RewardUpdate { duration } => fund_reward(deps, env, balance, duration),
     }
 }
-
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn fund_reward(
     deps: DepsMut,
     env: Env,
@@ -169,7 +168,6 @@ pub fn fund_reward(
     Ok(res)
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute_bond(
     deps: DepsMut,
     env: Env,

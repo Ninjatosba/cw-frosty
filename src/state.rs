@@ -1,12 +1,13 @@
 use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
 use crate::helper;
+use cosmwasm_schema::cw_serde;
 use cw_storage_plus::{Item, Map};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct State {
     pub global_index: Decimal256,
     pub total_staked: Uint128,
@@ -18,7 +19,7 @@ pub struct State {
     pub last_updated: Timestamp,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct Claim {
     pub amount: Uint128,
     pub release_at: Timestamp,
@@ -28,7 +29,7 @@ pub struct Claim {
 pub const STATE: Item<State> = Item::new("state");
 pub const CLAIMS: Map<&Addr, Vec<Claim>> = Map::new("claims");
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct Config {
     pub admin: Addr,
     pub stake_denom: Addr,
@@ -44,7 +45,7 @@ pub struct CW20Balance {
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct StakePosition {
     pub staked_amount: Uint128,
     pub index: Decimal256,
