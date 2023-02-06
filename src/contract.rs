@@ -18,8 +18,9 @@ use std::vec;
 
 use crate::helper::{self, days_to_seconds, get_decimals};
 use crate::msg::{
-    AccruedRewardsResponse, ConfigResponse, ExecuteMsg, HolderResponse, HoldersResponse,
-    InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, StateResponse,
+    AccruedRewardsResponse, ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg,
+    ListClaimsResponse, MigrateMsg, QueryMsg, ReceiveMsg, StakerForAllDurationResponse,
+    StakerResponse, StateResponse,
 };
 use crate::state::{
     self, CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
@@ -566,14 +567,14 @@ pub fn execute_force_claim(
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
-        QueryMsg::AccruedRewards { address } => {
-            to_binary(&query_accrued_rewards(env, deps, address)?)
-        }
-        QueryMsg::Holder { address } => to_binary(&query_holder(env, deps, address)?),
         QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
-        QueryMsg::Holders { start_after, limit } => {
-            to_binary(&query_holders(deps, env, start_after, limit)?)
+        QueryMsg::StakerForDuration { address, duration } => {
+            to_binary(&query_staker_for_duration(env, deps, address, duration)?)
         }
+        QueryMsg::StakerForAllDuration { address } => {
+            to_binary(&query_staker_for_all_duration(deps, env, address)?)
+        }
+        QueryMsg::ListClaims { address } => to_binary(&query_list_claims(env, deps, address)?),
     }
 }
 
@@ -596,65 +597,76 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        staked_token_denom: config.staked_token_denom,
-        reward_denom: config.reward_denom,
-        admin: config.admin.into_string(),
+        reward_denom: config.reward_denom.to_string(),
+        staked_denom: config.stake_denom.to_string(),
+        admin: config.admin.to_string(),
+        fee_collector: config.fee_collector.to_string(),
+        force_claim_ratio: config.force_claim_ratio.to_string(),
     })
 }
 
-pub fn query_accrued_rewards(
+pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
+    let addr = deps.api.addr_validate(&address)?;
+    let claim = CLAIMS.load(deps.storage, &addr)?;
+    let claims: Vec<ClaimResponse> = claim
+        .into_iter()
+        .map(|claim| ClaimResponse {
+            amount: claim.amount,
+            release_at: claim.release_at,
+            unbond_at: claim.unbond_at,
+        })
+        .collect();
+    Ok(ListClaimsResponse { claims })
+}
+
+pub fn query_staker_for_duration(
     _env: Env,
     deps: Deps,
     address: String,
-) -> StdResult<AccruedRewardsResponse> {
+    duration: u128,
+) -> StdResult<StakerResponse> {
     let addr = deps.api.addr_validate(&address.as_str())?;
-    let holder = HOLDERS.load(deps.storage, &addr)?;
+    let staker = STAKERS.load(deps.storage, (&addr, duration))?;
 
-    Ok(AccruedRewardsResponse {
-        rewards: holder.pending_rewards,
+    Ok(StakerResponse {
+        staked_amount: staker.staked_amount,
+        index: staker.index,
+        bond_time: staker.bond_time,
+        unbond_duration_as_days: staker.unbond_duration_as_days,
+        pending_rewards: staker.pending_rewards,
+        dec_rewards: staker.dec_rewards,
+        last_claimed: staker.last_claimed,
     })
 }
-
-pub fn query_holder(_env: Env, deps: Deps, address: String) -> StdResult<HolderResponse> {
-    let holder: Holder = HOLDERS.load(deps.storage, &deps.api.addr_validate(address.as_str())?)?;
-    Ok(HolderResponse {
-        address: address,
-        balance: holder.balance,
-        index: holder.index,
-        pending_rewards: holder.pending_rewards,
-        dec_rewards: holder.dec_rewards,
-    })
-}
-
-const MAX_LIMIT: u32 = 30;
-const DEFAULT_LIMIT: u32 = 10;
 //query all holders list
-pub fn query_holders(
+pub fn query_staker_for_all_duration(
     deps: Deps,
     _env: Env,
-    start_after: Option<String>,
-    limit: Option<u32>,
-) -> StdResult<HoldersResponse> {
-    let addr = maybe_addr(deps.api, start_after)?;
-    let start = addr.as_ref().map(Bound::exclusive);
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let holders: StdResult<Vec<HolderResponse>> = HOLDERS
-        .range(deps.storage, start, None, Order::Ascending)
-        .take(limit)
+    address: String,
+) -> StdResult<StakerForAllDurationResponse> {
+    let addr = deps.api.addr_validate(&address)?;
+    //return all stakers of address
+    let positions: Vec<StakerResponse> = STAKERS
+        .prefix(&addr)
+        .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
-            let (addr, holder) = item?;
-            let holder_response = HolderResponse {
-                address: addr.to_string(),
-                balance: holder.balance,
-                index: holder.index,
-                pending_rewards: holder.pending_rewards,
-                dec_rewards: holder.dec_rewards,
+            let (key, value) = item.unwrap();
+            let response = StakerResponse {
+                staked_amount: value.staked_amount,
+                index: value.index,
+                bond_time: value.bond_time,
+                unbond_duration_as_days: value.unbond_duration_as_days,
+                pending_rewards: value.pending_rewards,
+                dec_rewards: value.dec_rewards,
+                last_claimed: value.last_claimed,
             };
-            Ok(holder_response)
+            response
         })
         .collect();
 
-    Ok(HoldersResponse { holders: holders? })
+    Ok(StakerForAllDurationResponse {
+        positions: positions,
+    })
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
