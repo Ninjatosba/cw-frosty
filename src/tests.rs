@@ -6,8 +6,8 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo, Uint128,
-        Uint256,
+        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo, Response,
+        Uint128, Uint256,
     };
     use cw_utils::PaymentError;
 
@@ -25,61 +25,56 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn proper_init() {
-    //     let mut deps = mock_dependencies();
-    //     let init_msg = default_init();
-    //     let env = mock_env();
-    //     let info = MessageInfo {
-    //         sender: Addr::unchecked("creator"),
-    //         funds: vec![],
-    //     };
-    //     //instantiate without admin
-    //     let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
-    //     //default response attributes is empty
-    //     assert_eq!(0, res.messages.len());
+    #[test]
+    fn proper_init() {
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        //instantiate without admin
+        let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        //default response attributes is empty
 
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     //check if state is correct
-    //     assert_eq!(
-    //         config_response,
-    //         StateResponse {
-    //             global_index: Decimal256::zero(),
-    //             total_staked: Uint128::zero(),
-    //             prev_reward_balance: Uint128::zero(),
-    //         }
-    //     );
-    //     //query config
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
-    //     let config_response: ConfigResponse = from_binary(&res).unwrap();
-    //     //check if config is correct
-    //     assert_eq!(
-    //         config_response,
-    //         ConfigResponse {
-    //             staked_token_denom: "staked".to_string(),
-    //             reward_denom: "rewards".to_string(),
-    //             admin: "creator".to_string(),
-    //         }
-    //     );
-    //     //instantiate with admin
-    //     let init_msg = InstantiateMsg {
-    //         staked_token_denom: "staked".to_string(),
-    //         reward_denom: "rewards".to_string(),
-    //         admin: Some(Addr::unchecked("admin").to_string()),
-    //     };
-    //     let info = MessageInfo {
-    //         sender: Addr::unchecked("creator"),
-    //         funds: vec![],
-    //     };
-    //     let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        assert_eq!(
+            res,
+            Response::default()
+                .add_attribute("method", "instantiate")
+                .add_attribute("admin", "creator")
+                .add_attribute("stake_denom", "staked")
+                .add_attribute("reward_denom", "rewards")
+                .add_attribute("force_claim_ratio", "0.1")
+                .add_attribute("fee_collector", "fee_collector")
+        );
 
-    //     //query config
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
-    //     let config_response: ConfigResponse = from_binary(&res).unwrap();
-    //     //admin is set to admin
-    //     assert_eq!(config_response.admin, "admin".to_string(),);
-    // }
+        // instantiate with admin
+        let mut deps = mock_dependencies();
+        let init_msg = InstantiateMsg {
+            stake_denom: "staked".to_string(),
+            reward_denom: "rewards".to_string(),
+            admin: Some("admin".to_string()),
+            force_claim_ratio: Decimal::from_str("0.1").unwrap(),
+            fee_collector: "fee_collector".to_string(),
+        };
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        assert_eq!(
+            res,
+            Response::default()
+                .add_attribute("method", "instantiate")
+                .add_attribute("admin", "admin")
+                .add_attribute("stake_denom", "staked")
+                .add_attribute("reward_denom", "rewards")
+                .add_attribute("force_claim_ratio", "0.1")
+                .add_attribute("fee_collector", "fee_collector")
+        );
+    }
 
     // #[test]
     // pub fn test_bond() {
