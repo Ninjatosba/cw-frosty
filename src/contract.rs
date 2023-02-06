@@ -43,10 +43,14 @@ pub fn instantiate(
     // validate fee_collector address
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
 
+    let stake_denom = deps.api.addr_validate(&msg.stake_denom)?;
+
+    let reward_denom = deps.api.addr_validate(&msg.reward_denom)?;
+
     let config = Config {
         admin: admin.clone(),
-        stake_denom: msg.stake_denom,
-        reward_denom: msg.reward_denom,
+        stake_denom: stake_denom,
+        reward_denom: reward_denom,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
     };

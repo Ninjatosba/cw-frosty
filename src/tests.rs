@@ -6,23 +6,24 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal256, MessageInfo, Uint128, Uint256,
+        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo, Uint128,
+        Uint256,
     };
     use cw_utils::PaymentError;
 
     use crate::contract::{execute, instantiate};
-    use crate::msg::{
-        ConfigResponse, ExecuteMsg, HolderResponse, InstantiateMsg, QueryMsg, StateResponse,
-    };
+    use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
     use crate::ContractError;
 
-    // fn default_init() -> InstantiateMsg {
-    //     InstantiateMsg {
-    //         staked_token_denom: "staked".to_string(),
-    //         reward_denom: "rewards".to_string(),
-    //         admin: None,
-    //     }
-    // }
+    fn default_init() -> InstantiateMsg {
+        InstantiateMsg {
+            stake_denom: "staked".to_string(),
+            reward_denom: "rewards".to_string(),
+            admin: None,
+            force_claim_ratio: Decimal::from_str("0.1").unwrap(),
+            fee_collector: "fee_collector".to_string(),
+        }
+    }
 
     // #[test]
     // fn proper_init() {

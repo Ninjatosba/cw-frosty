@@ -4,5 +4,5 @@ mod error;
 pub mod helper;
 pub mod msg;
 pub mod state;
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;

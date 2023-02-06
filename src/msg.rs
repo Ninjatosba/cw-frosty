@@ -9,8 +9,8 @@ use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
 #[cw_serde]
 pub struct InstantiateMsg {
-    pub stake_denom: Addr,
-    pub reward_denom: Addr,
+    pub stake_denom: String,
+    pub reward_denom: String,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
