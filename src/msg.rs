@@ -79,7 +79,11 @@ pub enum QueryMsg {
 pub struct StateResponse {
     pub global_index: Decimal256,
     pub total_staked: Uint128,
-    pub prev_reward_balance: Uint128,
+    pub total_weight: Decimal256,
+    pub reward_end_time: Timestamp,
+    pub reward_supply: Uint128,
+    pub start_time: Timestamp,
+    pub last_updated: Timestamp,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {

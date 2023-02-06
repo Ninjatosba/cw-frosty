@@ -56,8 +56,7 @@ pub fn instantiate(
         total_staked: Uint128::zero(),
         total_weight: Decimal256::zero(),
         reward_end_time: Timestamp::from_seconds(0),
-        total_reward_supply: Uint128::zero(),
-        remaining_reward_supply: Uint128::zero(),
+        reward_supply: Uint128::zero(),
         start_time: env.block.time,
         last_updated: env.block.time,
     };
@@ -142,6 +141,7 @@ pub fn fund_reward(
     duration: Duration,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
+
     // check denom
     if balance.denom != cfg.reward_denom {
         return Err(ContractError::InvalidCw20TokenAddress {});
@@ -150,11 +150,13 @@ pub fn fund_reward(
 
     let mut state = STATE.load(deps.storage)?;
 
-    let unclaimed_reward = state.remaining_reward_supply;
+    // update reward index so that we distrubute latest reward
+    update_reward_index(&mut state, env.block.time)?;
 
-    state.total_reward_supply = unclaimed_reward + amount;
+    let unclaimed_reward = state.reward_supply;
+    let new_reward_supply = unclaimed_reward + amount;
 
-    state.remaining_reward_supply = state.total_reward_supply;
+    state.reward_supply = new_reward_supply;
 
     state.reward_end_time = state
         .reward_end_time
@@ -247,9 +249,7 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     // Time elapsed since start
     let denominator = state.reward_end_time.seconds() - state.start_time.seconds();
 
-    let new_dist_balance = state
-        .total_reward_supply
-        .multiply_ratio(numerator, denominator);
+    let new_dist_balance = state.reward_supply.multiply_ratio(numerator, denominator);
 
     let divider = state
         .total_weight
@@ -259,9 +259,7 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
 
-    state.remaining_reward_supply = state
-        .remaining_reward_supply
-        .checked_sub(new_dist_balance)?;
+    state.reward_supply = state.reward_supply.checked_sub(new_dist_balance)?;
     state.global_index = state.global_index.add(adding_index);
     state.last_updated = now;
     Ok(())
@@ -564,98 +562,102 @@ pub fn execute_force_claim(
         .add_attribute("cut_amount", cut_amount.to_string());
     Ok(res)
 }
-// // #[cfg_attr(not(feature = "library"), entry_point)]
-// // pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
-// //     match msg {
-// //         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
-// //         QueryMsg::AccruedRewards { address } => {
-// //             to_binary(&query_accrued_rewards(env, deps, address)?)
-// //         }
-// //         QueryMsg::Holder { address } => to_binary(&query_holder(env, deps, address)?),
-// //         QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
-// //         QueryMsg::Holders { start_after, limit } => {
-// //             to_binary(&query_holders(deps, env, start_after, limit)?)
-// //         }
-// //     }
-// // }
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
+        QueryMsg::AccruedRewards { address } => {
+            to_binary(&query_accrued_rewards(env, deps, address)?)
+        }
+        QueryMsg::Holder { address } => to_binary(&query_holder(env, deps, address)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
+        QueryMsg::Holders { start_after, limit } => {
+            to_binary(&query_holders(deps, env, start_after, limit)?)
+        }
+    }
+}
 
-// // pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
-// //     let state = STATE.load(deps.storage)?;
+pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
+    let state = STATE.load(deps.storage)?;
 
-// //     Ok(StateResponse {
-// //         total_staked: state.total_staked,
-// //         global_index: state.global_index,
-// //         prev_reward_balance: state.prev_reward_balance,
-// //     })
-// // }
+    Ok(StateResponse {
+        global_index: state.global_index,
+        total_staked: state.total_staked,
+        total_weight: state.total_weight,
+        reward_end_time: state.reward_end_time,
+        reward_supply: state.reward_supply,
+        start_time: state.start_time,
+        last_updated: state.last_updated,
+    })
+}
 
-// // //query config
-// // pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
-// //     let config = CONFIG.load(deps.storage)?;
+//query config
+pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
 
-// //     Ok(ConfigResponse {
-// //         staked_token_denom: config.staked_token_denom,
-// //         reward_denom: config.reward_denom,
-// //         admin: config.admin.into_string(),
-// //     })
-// // }
+    Ok(ConfigResponse {
+        staked_token_denom: config.staked_token_denom,
+        reward_denom: config.reward_denom,
+        admin: config.admin.into_string(),
+    })
+}
 
-// // pub fn query_accrued_rewards(
-// //     _env: Env,
-// //     deps: Deps,
-// //     address: String,
-// // ) -> StdResult<AccruedRewardsResponse> {
-// //     let addr = deps.api.addr_validate(&address.as_str())?;
-// //     let holder = HOLDERS.load(deps.storage, &addr)?;
+pub fn query_accrued_rewards(
+    _env: Env,
+    deps: Deps,
+    address: String,
+) -> StdResult<AccruedRewardsResponse> {
+    let addr = deps.api.addr_validate(&address.as_str())?;
+    let holder = HOLDERS.load(deps.storage, &addr)?;
 
-// //     Ok(AccruedRewardsResponse {
-// //         rewards: holder.pending_rewards,
-// //     })
-// // }
+    Ok(AccruedRewardsResponse {
+        rewards: holder.pending_rewards,
+    })
+}
 
-// // pub fn query_holder(_env: Env, deps: Deps, address: String) -> StdResult<HolderResponse> {
-// //     let holder: Holder = HOLDERS.load(deps.storage, &deps.api.addr_validate(address.as_str())?)?;
-// //     Ok(HolderResponse {
-// //         address: address,
-// //         balance: holder.balance,
-// //         index: holder.index,
-// //         pending_rewards: holder.pending_rewards,
-// //         dec_rewards: holder.dec_rewards,
-// //     })
-// // }
+pub fn query_holder(_env: Env, deps: Deps, address: String) -> StdResult<HolderResponse> {
+    let holder: Holder = HOLDERS.load(deps.storage, &deps.api.addr_validate(address.as_str())?)?;
+    Ok(HolderResponse {
+        address: address,
+        balance: holder.balance,
+        index: holder.index,
+        pending_rewards: holder.pending_rewards,
+        dec_rewards: holder.dec_rewards,
+    })
+}
 
-// // const MAX_LIMIT: u32 = 30;
-// // const DEFAULT_LIMIT: u32 = 10;
-// // //query all holders list
-// // pub fn query_holders(
-// //     deps: Deps,
-// //     _env: Env,
-// //     start_after: Option<String>,
-// //     limit: Option<u32>,
-// // ) -> StdResult<HoldersResponse> {
-// //     let addr = maybe_addr(deps.api, start_after)?;
-// //     let start = addr.as_ref().map(Bound::exclusive);
-// //     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-// //     let holders: StdResult<Vec<HolderResponse>> = HOLDERS
-// //         .range(deps.storage, start, None, Order::Ascending)
-// //         .take(limit)
-// //         .map(|item| {
-// //             let (addr, holder) = item?;
-// //             let holder_response = HolderResponse {
-// //                 address: addr.to_string(),
-// //                 balance: holder.balance,
-// //                 index: holder.index,
-// //                 pending_rewards: holder.pending_rewards,
-// //                 dec_rewards: holder.dec_rewards,
-// //             };
-// //             Ok(holder_response)
-// //         })
-// //         .collect();
+const MAX_LIMIT: u32 = 30;
+const DEFAULT_LIMIT: u32 = 10;
+//query all holders list
+pub fn query_holders(
+    deps: Deps,
+    _env: Env,
+    start_after: Option<String>,
+    limit: Option<u32>,
+) -> StdResult<HoldersResponse> {
+    let addr = maybe_addr(deps.api, start_after)?;
+    let start = addr.as_ref().map(Bound::exclusive);
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let holders: StdResult<Vec<HolderResponse>> = HOLDERS
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|item| {
+            let (addr, holder) = item?;
+            let holder_response = HolderResponse {
+                address: addr.to_string(),
+                balance: holder.balance,
+                index: holder.index,
+                pending_rewards: holder.pending_rewards,
+                dec_rewards: holder.dec_rewards,
+            };
+            Ok(holder_response)
+        })
+        .collect();
 
-// //     Ok(HoldersResponse { holders: holders? })
-// // }
+    Ok(HoldersResponse { holders: holders? })
+}
 
-// // #[cfg_attr(not(feature = "library"), entry_point)]
-// // pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-// //     Ok(Response::default())
-// // }
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
+}
