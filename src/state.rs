@@ -13,8 +13,7 @@ pub struct State {
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
     pub reward_end_time: Timestamp,
-    pub total_reward_supply: Uint128,
-    pub remaining_reward_supply: Uint128,
+    pub reward_supply: Uint128,
     pub start_time: Timestamp,
     pub last_updated: Timestamp,
 }

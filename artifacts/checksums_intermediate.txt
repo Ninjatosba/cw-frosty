@@ -1,1 +1,1 @@
-05735bd778c7ed4896186e82b306813c8e74ba180b1dfa746e72a126a662596d  ./target/wasm32-unknown-unknown/release/cw_share.wasm
+9cd1839b5298f3eb4c9c1a75cde4680ff6c533a17d0ab12d65de6dd8138fa739  ./target/wasm32-unknown-unknown/release/cw_share.wasm
