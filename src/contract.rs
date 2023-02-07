@@ -244,11 +244,6 @@ pub fn execute_bond(
 pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
 
-    // Zero staking check
-    if state.total_staked.is_zero() {
-        return Err(ContractError::NoBond {});
-    }
-
     update_reward_index(&mut state, env.block.time)?;
 
     STATE.save(deps.storage, &state)?;
@@ -270,31 +265,30 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .seconds()
         .checked_sub(state.last_updated.seconds())
         .unwrap();
-
+    println!("numerator: {}", numerator);
     // Time elapsed since start
     let denominator = state
         .reward_end_time
         .seconds()
         .checked_sub(state.start_time.seconds())
         .unwrap_or(1u64);
-
+    println!("denominator: {}", denominator);
     let new_dist_balance = state.reward_supply.multiply_ratio(numerator, denominator);
-
+    println!("new_dist_balance: {}", new_dist_balance);
     let divider = state
         .total_weight
         .checked_mul(Decimal256::from_ratio(state.total_staked, Uint256::one()))?;
-
+    println!("divider: {}", divider);
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
-
+    println!("adding_index: {}", adding_index);
     state.reward_supply = state
         .reward_supply
         .checked_sub(new_dist_balance)
         .unwrap_or(Uint128::zero());
 
     state.global_index = state.global_index.add(adding_index);
-
     state.last_updated = now;
 
     Ok(())

@@ -12,7 +12,9 @@ mod tests {
     use cw20::Cw20ReceiveMsg;
     use cw_utils::PaymentError;
 
-    use crate::contract::{execute, instantiate, query, query_staker_for_all_duration};
+    use crate::contract::{
+        execute, instantiate, query, query_staker_for_all_duration, query_state,
+    };
     use crate::msg::{
         ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg,
         StakerForAllDurationResponse, StakerResponse, StateResponse,
@@ -134,13 +136,7 @@ mod tests {
         );
 
         // bond again with same duration and address
-        let info = mock_info(
-            "stake_token_address",
-            &vec![Coin {
-                denom: "staked".to_string(),
-                amount: Uint128::new(100),
-            }],
-        );
+        let info = mock_info("stake_token_address", &vec![]);
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "creator1".to_string(),
             amount: Uint128::new(100),
@@ -157,6 +153,67 @@ mod tests {
         assert_eq!(res.positions[0].staked_amount, Uint128::new(200));
         assert_eq!(res.positions[0].unbond_duration_as_days, 10);
         assert_eq!(res.positions[0].index, Decimal256::zero());
+    }
+
+    #[test]
+    pub fn test_fund_reward() {
+        //instantiation
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+
+        // update_reward_index before fund_reward
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[1].value, "0".to_string());
+
+        //fund reward
+        let info = mock_info("reward_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // update reward index after fund_reward but without any bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[1].value, "0".to_string());
+
+        // bond
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+
+        // update reward index after fund_reward and bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(100);
+        let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
+
+        assert_eq!(
+            res.attributes[1].value,
+            "316.227766016837933299".to_string()
+        );
     }
 
     // #[test]
