@@ -142,16 +142,22 @@ pub fn execute_receive(
             api.addr_validate(&wrapper.sender)?,
             duration_day,
         ),
-        ReceiveMsg::RewardUpdate { duration } => fund_reward(deps, env, balance, duration),
+        ReceiveMsg::RewardUpdate { reward_end_time } => {
+            fund_reward(deps, env, balance, reward_end_time)
+        }
     }
 }
 pub fn fund_reward(
     deps: DepsMut,
     env: Env,
     balance: CW20Balance,
-    duration: Duration,
+    reward_end_time: Timestamp,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
+
+    if reward_end_time <= env.block.time {
+        return Err(ContractError::InvalidRewardEndTime {});
+    }
 
     // check denom
     if balance.denom != cfg.reward_token_address {
@@ -161,18 +167,15 @@ pub fn fund_reward(
 
     let mut state = STATE.load(deps.storage)?;
 
-    // update reward index so that we distrubute latest reward
+    // update reward index so that we distrubute latest reward.
     update_reward_index(&mut state, env.block.time)?;
     let unclaimed_reward = state.reward_supply;
     let new_reward_supply = unclaimed_reward + amount;
 
     state.reward_supply = new_reward_supply;
 
-    // change it so that reward duration can be also decreasable
-    state.reward_end_time = state
-        .reward_end_time
-        .plus_nanos(duration.as_nanos().try_into().unwrap());
-
+    state.reward_end_time = reward_end_time;
+    // every time we fund reward we reset start time.
     state.start_time = env.block.time;
     STATE.save(deps.storage, &state)?;
     //TODO add responses
