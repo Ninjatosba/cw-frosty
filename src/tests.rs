@@ -167,6 +167,19 @@ mod tests {
         };
         let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
 
+        // fund reward with wrong end_time
+        let info = mock_info("reward_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.minus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+        assert_eq!(res, ContractError::InvalidRewardEndTime {});
+
         // update_reward_index before fund_reward
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::UpdateRewardIndex {};
