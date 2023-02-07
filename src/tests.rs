@@ -7,14 +7,15 @@ mod tests {
     };
     use cosmwasm_std::{
         from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo,
-        Response, Uint128, Uint256,
+        Response, Timestamp, Uint128, Uint256,
     };
     use cw20::Cw20ReceiveMsg;
     use cw_utils::PaymentError;
 
-    use crate::contract::{execute, instantiate};
+    use crate::contract::{execute, instantiate, query, query_staker_for_all_duration};
     use crate::msg::{
-        ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, StateResponse,
+        ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg,
+        StakerForAllDurationResponse, StakerResponse, StateResponse,
     };
     use crate::ContractError;
 
@@ -111,16 +112,51 @@ mod tests {
             amount: Uint128::new(100),
             msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
         });
-        println!("env: {:?}", env.block.time.seconds());
+
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // query  staker
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "creator1".to_string())
+            .unwrap();
         assert_eq!(
             res,
-            Response::default()
-                .add_attribute("method", "bond")
-                .add_attribute("staker", "creator1")
-                .add_attribute("amount", "100")
-                .add_attribute("duration_day", "10")
+            StakerForAllDurationResponse {
+                positions: vec![StakerResponse {
+                    staked_amount: Uint128::new(100),
+                    index: Decimal::zero().into(),
+                    bond_time: Timestamp::from_nanos(1571797419879305533),
+                    unbond_duration_as_days: 10,
+                    pending_rewards: Uint128::zero(),
+                    dec_rewards: Decimal::zero().into(),
+                    last_claimed: Timestamp::from_nanos(1571797419879305533),
+                }]
+            }
         );
+
+        // bond again with same duration and address
+        let info = mock_info(
+            "stake_token_address",
+            &vec![Coin {
+                denom: "staked".to_string(),
+                amount: Uint128::new(100),
+            }],
+        );
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // query  staker
+        let res =
+            query_staker_for_all_duration(deps.as_ref(), env, "creator1".to_string()).unwrap();
+
+        assert_eq!(res.positions.len(), 1);
+        assert_eq!(res.positions[0].staked_amount, Uint128::new(200));
+        assert_eq!(res.positions[0].unbond_duration_as_days, 10);
+        assert_eq!(res.positions[0].index, Decimal256::zero());
     }
 
     // #[test]

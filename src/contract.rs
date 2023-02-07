@@ -60,7 +60,7 @@ pub fn instantiate(
         global_index: Decimal256::zero(),
         total_staked: Uint128::zero(),
         total_weight: Decimal256::zero(),
-        reward_end_time: env.block.time,
+        reward_end_time: env.block.time.plus_seconds(1),
         reward_supply: Uint128::zero(),
         start_time: env.block.time,
         last_updated: env.block.time,
@@ -232,7 +232,8 @@ pub fn execute_bond(
     let res = Response::new()
         .add_attribute("action", "bond")
         .add_attribute("sender", sender)
-        .add_attribute("amount", amount);
+        .add_attribute("amount", amount)
+        .add_attribute("duration_day", duration.to_string());
 
     Ok(res)
 }
