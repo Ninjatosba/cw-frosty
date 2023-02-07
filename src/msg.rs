@@ -53,7 +53,7 @@ pub enum ExecuteMsg {
 
 pub enum ReceiveMsg {
     Bond { duration_day: u128 },
-    RewardUpdate { duration: Duration },
+    RewardUpdate { reward_end_time: Timestamp },
 }
 
 #[cw_serde]

@@ -20,6 +20,9 @@ pub enum ContractError {
     #[error("No rewards accrued")]
     NoRewards {},
 
+    #[error("Reward end time cannot be in the past")]
+    InvalidRewardEndTime {},
+
     #[error("Unauthorized")]
     Unauthorized {},
 
