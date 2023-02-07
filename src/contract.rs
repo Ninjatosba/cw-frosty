@@ -43,14 +43,14 @@ pub fn instantiate(
     // validate fee_collector address
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
 
-    let stake_denom = deps.api.addr_validate(&msg.stake_denom)?;
+    let stake_token_address = deps.api.addr_validate(&msg.stake_token_address)?;
 
-    let reward_denom = deps.api.addr_validate(&msg.reward_denom)?;
+    let reward_token_address = deps.api.addr_validate(&msg.reward_token_address)?;
 
     let config = Config {
         admin: admin.clone(),
-        stake_denom: stake_denom,
-        reward_denom: reward_denom,
+        stake_token_address: stake_token_address,
+        reward_token_address: reward_token_address,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
     };
@@ -60,7 +60,7 @@ pub fn instantiate(
         global_index: Decimal256::zero(),
         total_staked: Uint128::zero(),
         total_weight: Decimal256::zero(),
-        reward_end_time: Timestamp::from_seconds(0),
+        reward_end_time: env.block.time,
         reward_supply: Uint128::zero(),
         start_time: env.block.time,
         last_updated: env.block.time,
@@ -69,8 +69,14 @@ pub fn instantiate(
     let res = Response::default()
         .add_attribute("method", "instantiate")
         .add_attribute("admin", admin.clone())
-        .add_attribute("stake_denom", config.stake_denom.to_string())
-        .add_attribute("reward_denom", config.reward_denom.to_string())
+        .add_attribute(
+            "stake_token_address",
+            config.stake_token_address.to_string(),
+        )
+        .add_attribute(
+            "reward_token_address",
+            config.reward_token_address.to_string(),
+        )
         .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
         .add_attribute("fee_collector", config.fee_collector);
     Ok(res)
@@ -96,16 +102,16 @@ pub fn execute(
         ExecuteMsg::ClaimUnbounded {} => execute_claim(deps, env, info),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
         ExecuteMsg::UpdateConfig {
-            staked_token_denom,
-            reward_denom,
+            stake_token_address,
+            reward_token_address,
             admin,
             fee_collector,
         } => execute_update_config(
             deps,
             env,
             info,
-            staked_token_denom,
-            reward_denom,
+            stake_token_address,
+            reward_token_address,
             fee_collector,
             admin,
         ),
@@ -148,7 +154,7 @@ pub fn fund_reward(
     let cfg = CONFIG.load(deps.storage)?;
 
     // check denom
-    if balance.denom != cfg.reward_denom {
+    if balance.denom != cfg.reward_token_address {
         return Err(ContractError::InvalidCw20TokenAddress {});
     }
     let amount = balance.amount;
@@ -157,12 +163,12 @@ pub fn fund_reward(
 
     // update reward index so that we distrubute latest reward
     update_reward_index(&mut state, env.block.time)?;
-
     let unclaimed_reward = state.reward_supply;
     let new_reward_supply = unclaimed_reward + amount;
 
     state.reward_supply = new_reward_supply;
 
+    // change it so that reward duration can be also decreasable
     state.reward_end_time = state
         .reward_end_time
         .plus_nanos(duration.as_nanos().try_into().unwrap());
@@ -184,10 +190,15 @@ pub fn execute_bond(
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
     // check denom
-    if balance.denom != cfg.stake_denom {
+    if balance.denom != cfg.stake_token_address {
         return Err(ContractError::InvalidCw20TokenAddress {});
     }
+
     let amount = balance.amount;
+
+    if amount.is_zero() {
+        return Err(ContractError::NoFund {});
+    }
     let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
     let mut staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
@@ -249,10 +260,19 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     if now > state.reward_end_time {
         now = state.reward_end_time;
     }
+
     // Time elapsed since last update
-    let numerator = now.minus_seconds(state.last_updated.seconds()).seconds();
+    let numerator = now
+        .seconds()
+        .checked_sub(state.last_updated.seconds())
+        .unwrap();
+
     // Time elapsed since start
-    let denominator = state.reward_end_time.seconds() - state.start_time.seconds();
+    let denominator = state
+        .reward_end_time
+        .seconds()
+        .checked_sub(state.start_time.seconds())
+        .unwrap_or(1u64);
 
     let new_dist_balance = state.reward_supply.multiply_ratio(numerator, denominator);
 
@@ -264,9 +284,15 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
 
-    state.reward_supply = state.reward_supply.checked_sub(new_dist_balance)?;
+    state.reward_supply = state
+        .reward_supply
+        .checked_sub(new_dist_balance)
+        .unwrap_or(Uint128::zero());
+
     state.global_index = state.global_index.add(adding_index);
+
     state.last_updated = now;
+
     Ok(())
 }
 
@@ -369,7 +395,7 @@ pub fn execute_receive_reward(
         })
         .sum();
 
-    let reward_asset = Asset::cw20(config.reward_denom, rewards);
+    let reward_asset = Asset::cw20(config.reward_token_address, rewards);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
     let res = Response::new()
         .add_message(reward_msg)
@@ -420,7 +446,7 @@ pub fn execute_unbond(
     }];
     CLAIMS.save(deps.storage, &info.sender, &claim)?;
 
-    let reward_asset = Asset::cw20(config.reward_denom, reward);
+    let reward_asset = Asset::cw20(config.reward_token_address, reward);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
     let res = Response::new()
@@ -437,8 +463,8 @@ pub fn execute_update_config(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    stake_denom: Option<String>,
-    reward_denom: Option<String>,
+    stake_token_address: Option<String>,
+    reward_token_address: Option<String>,
     fee_collector: Option<String>,
     admin: Option<String>,
 ) -> Result<Response, ContractError> {
@@ -446,11 +472,11 @@ pub fn execute_update_config(
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
-    if let Some(stake_denom) = stake_denom {
-        config.stake_denom = deps.api.addr_validate(&stake_denom)?;
+    if let Some(stake_token_address) = stake_token_address {
+        config.stake_token_address = deps.api.addr_validate(&stake_token_address)?;
     }
-    if let Some(reward_denom) = reward_denom {
-        config.reward_denom = deps.api.addr_validate(&reward_denom)?;
+    if let Some(reward_token_address) = reward_token_address {
+        config.reward_token_address = deps.api.addr_validate(&reward_token_address)?;
     }
     if let Some(fee_collector) = fee_collector {
         config.fee_collector = deps.api.addr_validate(&fee_collector)?;
@@ -496,7 +522,7 @@ pub fn execute_claim(
     //save new claim vector
     CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
 
-    let stake_asset = Asset::cw20(config.stake_denom, total_claim);
+    let stake_asset = Asset::cw20(config.stake_token_address, total_claim);
     let asset_message = stake_asset.transfer_msg(info.sender)?;
 
     let res = Response::new()
@@ -553,10 +579,10 @@ pub fn execute_force_claim(
     //claim_amount = desired_claim.amount - cut_amount
     let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
     //send cut_amount to fee_collector
-    let cut_asset = Asset::cw20(config.stake_denom.clone(), cut_amount);
+    let cut_asset = Asset::cw20(config.stake_token_address.clone(), cut_amount);
     let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
     //send claim_amount to user
-    let claim_asset = Asset::cw20(config.stake_denom.clone(), claim_amount);
+    let claim_asset = Asset::cw20(config.stake_token_address.clone(), claim_amount);
     let claim_message = claim_asset.transfer_msg(info.sender)?;
 
     let res = Response::new()
@@ -601,8 +627,8 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        reward_denom: config.reward_denom.to_string(),
-        staked_denom: config.stake_denom.to_string(),
+        reward_token_address: config.reward_token_address.to_string(),
+        stake_token_address: config.stake_token_address.to_string(),
         admin: config.admin.to_string(),
         fee_collector: config.fee_collector.to_string(),
         force_claim_ratio: config.force_claim_ratio.to_string(),

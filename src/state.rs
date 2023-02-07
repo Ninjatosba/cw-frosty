@@ -31,8 +31,8 @@ pub const CLAIMS: Map<&Addr, Vec<Claim>> = Map::new("claims");
 #[cw_serde]
 pub struct Config {
     pub admin: Addr,
-    pub stake_denom: Addr,
-    pub reward_denom: Addr,
+    pub stake_token_address: Addr,
+    pub reward_token_address: Addr,
     pub force_claim_ratio: Decimal,
     pub fee_collector: Addr,
 }

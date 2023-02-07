@@ -6,19 +6,22 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo, Response,
-        Uint128, Uint256,
+        from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo,
+        Response, Uint128, Uint256,
     };
+    use cw20::Cw20ReceiveMsg;
     use cw_utils::PaymentError;
 
     use crate::contract::{execute, instantiate};
-    use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, StateResponse};
+    use crate::msg::{
+        ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, StateResponse,
+    };
     use crate::ContractError;
 
     fn default_init() -> InstantiateMsg {
         InstantiateMsg {
-            stake_denom: "staked".to_string(),
-            reward_denom: "rewards".to_string(),
+            stake_token_address: "stake_token_address".to_string(),
+            reward_token_address: "reward_token_address".to_string(),
             admin: None,
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
@@ -43,8 +46,8 @@ mod tests {
             Response::default()
                 .add_attribute("method", "instantiate")
                 .add_attribute("admin", "creator")
-                .add_attribute("stake_denom", "staked")
-                .add_attribute("reward_denom", "rewards")
+                .add_attribute("stake_token_address", "stake_token_address")
+                .add_attribute("reward_token_address", "reward_token_address")
                 .add_attribute("force_claim_ratio", "0.1")
                 .add_attribute("fee_collector", "fee_collector")
         );
@@ -52,8 +55,8 @@ mod tests {
         // instantiate with admin
         let mut deps = mock_dependencies();
         let init_msg = InstantiateMsg {
-            stake_denom: "staked".to_string(),
-            reward_denom: "rewards".to_string(),
+            stake_token_address: "stake_token_address".to_string(),
+            reward_token_address: "reward_token_address".to_string(),
             admin: Some("admin".to_string()),
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
@@ -69,151 +72,56 @@ mod tests {
             Response::default()
                 .add_attribute("method", "instantiate")
                 .add_attribute("admin", "admin")
-                .add_attribute("stake_denom", "staked")
-                .add_attribute("reward_denom", "rewards")
+                .add_attribute("stake_token_address", "stake_token_address")
+                .add_attribute("reward_token_address", "reward_token_address")
                 .add_attribute("force_claim_ratio", "0.1")
                 .add_attribute("fee_collector", "fee_collector")
         );
     }
 
-    // #[test]
-    // pub fn test_bond() {
-    //     //instantiate
-    //     let mut deps = mock_dependencies();
-    //     let init_msg = default_init();
-    //     let env = mock_env();
-    //     let info = mock_info("creator", &[]);
-    //     instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
+    #[test]
+    pub fn test_bond() {
+        //instantiate
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg);
 
-    //     //bond with no fund
-    //     let info = mock_info("staker1", &[]);
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
-    //     assert_eq!(res, PaymentError::NoFunds {}.into());
+        //bond with no funds
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator1".to_string(),
+            amount: Uint128::zero(),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+        assert_eq!(res, ContractError::NoFund {});
 
-    //     //bond with wrong denom
-    //     let info = mock_info(
-    //         "random",
-    //         &vec![Coin {
-    //             denom: "wrong".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
-    //     assert_eq!(res, PaymentError::MissingDenom("staked".to_string()).into());
-
-    //     //first bond
-    //     let info = mock_info(
-    //         "staker1",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-    //     //query holder
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker1".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
-    //     assert_eq!(
-    //         holder_response,
-    //         HolderResponse {
-    //             address: "staker1".to_string(),
-    //             balance: Uint128::new(100),
-    //             index: Decimal256::zero(),
-    //             pending_rewards: Uint128::zero(),
-    //             dec_rewards: Decimal256::zero(),
-    //         }
-    //     );
-
-    //     //query contract state for total_staked
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.total_staked, Uint128::new(100),);
-
-    //     //update balance so we can bond with index update
-    //     deps.querier.update_balance(
-    //         env.contract.address.as_str(),
-    //         vec![Coin {
-    //             denom: "rewards".to_string(),
-    //             amount: Uint128::new(1000000),
-    //         }],
-    //     );
-
-    //     //second bond
-    //     let info = mock_info(
-    //         "staker2",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-    //     //query staker2's index
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker2".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
-
-    //     //check if index is correct
-    //     assert_eq!(
-    //         holder_response.index,
-    //         Decimal256::from_ratio(Uint128::new(1000000), Uint128::new(100))
-    //     );
-
-    //     //test bond again after withdrawal of user
-    //     let info = mock_info("staker2", &[]);
-    //     let msg = ExecuteMsg::WithdrawStake { amount: None };
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-    //     //bond again
-    //     let info = mock_info(
-    //         "staker2",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-    //     //query staker2
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker2".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
-    //     assert_eq!(
-    //         holder_response,
-    //         HolderResponse {
-    //             address: "staker2".to_string(),
-    //             balance: Uint128::new(100),
-    //             index: Decimal256::from_ratio(Uint128::new(1000000), Uint128::new(100)),
-    //             pending_rewards: Uint128::zero(),
-    //             dec_rewards: Decimal256::zero(),
-    //         }
-    //     );
-    // }
+        //bond with funds
+        let info = mock_info(
+            "stake_token_address",
+            &vec![Coin {
+                denom: "staked".to_string(),
+                amount: Uint128::new(100),
+            }],
+        );
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        println!("env: {:?}", env.block.time.seconds());
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(
+            res,
+            Response::default()
+                .add_attribute("method", "bond")
+                .add_attribute("staker", "creator1")
+                .add_attribute("amount", "100")
+                .add_attribute("duration_day", "10")
+        );
+    }
 
     // #[test]
     // pub fn test_update_reward_index() {
@@ -622,7 +530,7 @@ mod tests {
     //     //random can't update config
     //     let info: MessageInfo = mock_info("random", &[]);
     //     let msg = ExecuteMsg::UpdateConfig {
-    //         reward_denom: Some("new_reward_denom".to_string()),
+    //         reward_token_address: Some("new_reward_token_address".to_string()),
     //         staked_token_denom: Some("new_staked_token_denom".to_string()),
     //         admin: Some("new_admin".to_string()),
     //     };
@@ -632,7 +540,7 @@ mod tests {
     //     //creator can update config
     //     let info: MessageInfo = mock_info("creator", &[]);
     //     let msg = ExecuteMsg::UpdateConfig {
-    //         reward_denom: Some("new_reward_denom".to_string()),
+    //         reward_token_address: Some("new_reward_token_address".to_string()),
     //         staked_token_denom: Some("new_staked_token_denom".to_string()),
     //         admin: Some("new_admin".to_string()),
     //     };
@@ -642,7 +550,7 @@ mod tests {
     //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
     //     let config_response: ConfigResponse = from_binary(&res).unwrap();
     //     assert_eq!(config_response.admin, "new_admin".to_string());
-    //     assert_eq!(config_response.reward_denom, "new_reward_denom".to_string());
+    //     assert_eq!(config_response.reward_token_address, "new_reward_token_address".to_string());
     //     assert_eq!(
     //         config_response.staked_token_denom,
     //         "new_staked_token_denom".to_string()
