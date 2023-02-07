@@ -168,6 +168,7 @@ pub fn fund_reward(
     let mut state = STATE.load(deps.storage)?;
 
     // update reward index so that we distrubute latest reward.
+
     update_reward_index(&mut state, env.block.time)?;
     let unclaimed_reward = state.reward_supply;
     let new_reward_supply = unclaimed_reward + amount;
@@ -179,7 +180,10 @@ pub fn fund_reward(
     state.start_time = env.block.time;
     STATE.save(deps.storage, &state)?;
     //TODO add responses
-    let res = Response::new().add_attribute("action", "fund_reward");
+    let res = Response::new()
+        .add_attribute("action", "fund_reward")
+        .add_attribute("amount", amount.to_string())
+        .add_attribute("reward_end_time", reward_end_time.to_string());
 
     Ok(res)
 }
@@ -259,6 +263,8 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     if now > state.reward_end_time {
         now = state.reward_end_time;
     }
+    println!("now: {}", now.seconds());
+    println!("last_updated: {}", state.last_updated.seconds());
 
     // Time elapsed since last update
     let numerator = now

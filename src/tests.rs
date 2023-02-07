@@ -196,7 +196,8 @@ mod tests {
             })
             .unwrap(),
         });
-        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        println!("{:?}", res);
 
         // update reward index after fund_reward but without any bond
         let info = mock_info("creator", &[]);
@@ -213,9 +214,6 @@ mod tests {
         });
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-        // query  state
-        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-
         // update reward index after fund_reward and bond
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::UpdateRewardIndex {};
@@ -227,6 +225,58 @@ mod tests {
             res.attributes[1].value,
             "316.227766016837933299".to_string()
         );
+
+        // change reward end time without any fund
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(200);
+        println!(
+            "!!!{:?}",
+            env.block.time.plus_seconds(100_000_000).seconds()
+        );
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(0),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        assert_eq!(
+            res.reward_end_time,
+            Timestamp::from_nanos(1671797619879305533)
+        );
+
+        // change reward end time with fund
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(200);
+
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        assert_eq!(
+            res.reward_end_time,
+            Timestamp::from_nanos(1671797619879305533)
+        );
+        assert_eq!(
+            res.global_index,
+            Decimal256::from_str("632.139304267659028665").unwrap()
+        );
+        assert_eq!(res.reward_supply, Uint128::new(199800100));
     }
 
     // #[test]
