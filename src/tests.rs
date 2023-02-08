@@ -6,335 +6,449 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        from_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal256, MessageInfo, Uint128, Uint256,
+        from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo,
+        Response, Timestamp, Uint128, Uint256,
     };
+    use cw20::Cw20ReceiveMsg;
     use cw_utils::PaymentError;
 
-    use crate::contract::{execute, instantiate};
+    use crate::contract::{
+        execute, instantiate, query, query_staker_for_all_duration, query_staker_for_duration,
+        query_state,
+    };
     use crate::msg::{
-        ConfigResponse, ExecuteMsg, HolderResponse, InstantiateMsg, QueryMsg, StateResponse,
+        ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg,
+        StakerForAllDurationResponse, StakerResponse, StateResponse,
     };
     use crate::ContractError;
 
-    // fn default_init() -> InstantiateMsg {
-    //     InstantiateMsg {
-    //         staked_token_denom: "staked".to_string(),
-    //         reward_denom: "rewards".to_string(),
-    //         admin: None,
-    //     }
-    // }
+    fn default_init() -> InstantiateMsg {
+        InstantiateMsg {
+            stake_token_address: "stake_token_address".to_string(),
+            reward_token_address: "reward_token_address".to_string(),
+            admin: None,
+            force_claim_ratio: Decimal::from_str("0.1").unwrap(),
+            fee_collector: "fee_collector".to_string(),
+        }
+    }
 
-    // #[test]
-    // fn proper_init() {
-    //     let mut deps = mock_dependencies();
-    //     let init_msg = default_init();
-    //     let env = mock_env();
-    //     let info = MessageInfo {
-    //         sender: Addr::unchecked("creator"),
-    //         funds: vec![],
-    //     };
-    //     //instantiate without admin
-    //     let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
-    //     //default response attributes is empty
-    //     assert_eq!(0, res.messages.len());
+    #[test]
+    fn proper_init() {
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        //instantiate without admin
+        let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        //default response attributes is empty
 
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     //check if state is correct
-    //     assert_eq!(
-    //         config_response,
-    //         StateResponse {
-    //             global_index: Decimal256::zero(),
-    //             total_staked: Uint128::zero(),
-    //             prev_reward_balance: Uint128::zero(),
-    //         }
-    //     );
-    //     //query config
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
-    //     let config_response: ConfigResponse = from_binary(&res).unwrap();
-    //     //check if config is correct
-    //     assert_eq!(
-    //         config_response,
-    //         ConfigResponse {
-    //             staked_token_denom: "staked".to_string(),
-    //             reward_denom: "rewards".to_string(),
-    //             admin: "creator".to_string(),
-    //         }
-    //     );
-    //     //instantiate with admin
-    //     let init_msg = InstantiateMsg {
-    //         staked_token_denom: "staked".to_string(),
-    //         reward_denom: "rewards".to_string(),
-    //         admin: Some(Addr::unchecked("admin").to_string()),
-    //     };
-    //     let info = MessageInfo {
-    //         sender: Addr::unchecked("creator"),
-    //         funds: vec![],
-    //     };
-    //     let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        assert_eq!(
+            res,
+            Response::default()
+                .add_attribute("method", "instantiate")
+                .add_attribute("admin", "creator")
+                .add_attribute("stake_token_address", "stake_token_address")
+                .add_attribute("reward_token_address", "reward_token_address")
+                .add_attribute("force_claim_ratio", "0.1")
+                .add_attribute("fee_collector", "fee_collector")
+        );
 
-    //     //query config
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
-    //     let config_response: ConfigResponse = from_binary(&res).unwrap();
-    //     //admin is set to admin
-    //     assert_eq!(config_response.admin, "admin".to_string(),);
-    // }
+        // instantiate with admin
+        let mut deps = mock_dependencies();
+        let init_msg = InstantiateMsg {
+            stake_token_address: "stake_token_address".to_string(),
+            reward_token_address: "reward_token_address".to_string(),
+            admin: Some("admin".to_string()),
+            force_claim_ratio: Decimal::from_str("0.1").unwrap(),
+            fee_collector: "fee_collector".to_string(),
+        };
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        let res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+        assert_eq!(
+            res,
+            Response::default()
+                .add_attribute("method", "instantiate")
+                .add_attribute("admin", "admin")
+                .add_attribute("stake_token_address", "stake_token_address")
+                .add_attribute("reward_token_address", "reward_token_address")
+                .add_attribute("force_claim_ratio", "0.1")
+                .add_attribute("fee_collector", "fee_collector")
+        );
+    }
 
-    // #[test]
-    // pub fn test_bond() {
-    //     //instantiate
-    //     let mut deps = mock_dependencies();
-    //     let init_msg = default_init();
-    //     let env = mock_env();
-    //     let info = mock_info("creator", &[]);
-    //     instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
+    #[test]
+    pub fn test_bond() {
+        //instantiate
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg);
 
-    //     //bond with no fund
-    //     let info = mock_info("staker1", &[]);
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
-    //     assert_eq!(res, PaymentError::NoFunds {}.into());
+        //bond with no funds
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::zero(),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+        assert_eq!(res, ContractError::NoFund {});
 
-    //     //bond with wrong denom
-    //     let info = mock_info(
-    //         "random",
-    //         &vec![Coin {
-    //             denom: "wrong".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
-    //     assert_eq!(res, PaymentError::MissingDenom("staked".to_string()).into());
+        //bond with funds
+        let info = mock_info(
+            "stake_token_address",
+            &vec![Coin {
+                denom: "staked".to_string(),
+                amount: Uint128::new(100),
+            }],
+        );
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
 
-    //     //first bond
-    //     let info = mock_info(
-    //         "staker1",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //query holder
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker1".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
-    //     assert_eq!(
-    //         holder_response,
-    //         HolderResponse {
-    //             address: "staker1".to_string(),
-    //             balance: Uint128::new(100),
-    //             index: Decimal256::zero(),
-    //             pending_rewards: Uint128::zero(),
-    //             dec_rewards: Decimal256::zero(),
-    //         }
-    //     );
+        // query  staker
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
+            .unwrap();
+        assert_eq!(
+            res,
+            StakerForAllDurationResponse {
+                positions: vec![StakerResponse {
+                    staked_amount: Uint128::new(100),
+                    index: Decimal::zero().into(),
+                    bond_time: Timestamp::from_nanos(1571797419879305533),
+                    unbond_duration_as_days: 10,
+                    pending_rewards: Uint128::zero(),
+                    dec_rewards: Decimal::zero().into(),
+                    last_claimed: Timestamp::from_nanos(1571797419879305533),
+                }]
+            }
+        );
 
-    //     //query contract state for total_staked
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.total_staked, Uint128::new(100),);
+        // bond again with same duration and address
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
 
-    //     //update balance so we can bond with index update
-    //     deps.querier.update_balance(
-    //         env.contract.address.as_str(),
-    //         vec![Coin {
-    //             denom: "rewards".to_string(),
-    //             amount: Uint128::new(1000000),
-    //         }],
-    //     );
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //second bond
-    //     let info = mock_info(
-    //         "staker2",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        // query  staker
+        let res = query_staker_for_all_duration(deps.as_ref(), env, "staker1".to_string()).unwrap();
 
-    //     //query staker2's index
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker2".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
+        assert_eq!(res.positions.len(), 1);
+        assert_eq!(res.positions[0].staked_amount, Uint128::new(200));
+        assert_eq!(res.positions[0].unbond_duration_as_days, 10);
+        assert_eq!(res.positions[0].index, Decimal256::zero());
+    }
 
-    //     //check if index is correct
-    //     assert_eq!(
-    //         holder_response.index,
-    //         Decimal256::from_ratio(Uint128::new(1000000), Uint128::new(100))
-    //     );
+    #[test]
+    pub fn test_fund_reward() {
+        //instantiation
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
 
-    //     //test bond again after withdrawal of user
-    //     let info = mock_info("staker2", &[]);
-    //     let msg = ExecuteMsg::WithdrawStake { amount: None };
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        // fund reward with wrong end_time
+        let info = mock_info("reward_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.minus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+        assert_eq!(res, ContractError::InvalidRewardEndTime {});
 
-    //     //bond again
-    //     let info = mock_info(
-    //         "staker2",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        // update_reward_index before fund_reward
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[1].value, "0".to_string());
 
-    //     //query staker2
-    //     let res = query(
-    //         deps.as_ref(),
-    //         env.clone(),
-    //         QueryMsg::Holder {
-    //             address: "staker2".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-    //     let holder_response: HolderResponse = from_binary(&res).unwrap();
-    //     assert_eq!(
-    //         holder_response,
-    //         HolderResponse {
-    //             address: "staker2".to_string(),
-    //             balance: Uint128::new(100),
-    //             index: Decimal256::from_ratio(Uint128::new(1000000), Uint128::new(100)),
-    //             pending_rewards: Uint128::zero(),
-    //             dec_rewards: Decimal256::zero(),
-    //         }
-    //     );
-    // }
+        //fund reward
+        let info = mock_info("reward_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    // #[test]
-    // pub fn test_update_reward_index() {
-    //     let mut deps = mock_dependencies_with_balance(&[]);
-    //     let init_msg = default_init();
-    //     let env = mock_env();
-    //     instantiate(
-    //         deps.as_mut(),
-    //         env.clone(),
-    //         mock_info("creator", &[]),
-    //         init_msg,
-    //     )
-    //     .unwrap();
+        // update reward index after fund_reward but without any bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[1].value, "0".to_string());
 
-    //     //test index update before any bond
-    //     let info = mock_info("random", &[]);
-    //     let msg = ExecuteMsg::UpdateRewardIndex {};
-    //     let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
-    //     assert_eq!(res, ContractError::NoBond {});
+        // bond
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //first bond
-    //     let info = mock_info(
-    //         "staker1",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        // update reward index after fund_reward and bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(100);
+        let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
 
-    //     //update balance
-    //     deps.querier.update_balance(
-    //         env.contract.address.as_str(),
-    //         vec![Coin {
-    //             denom: "rewards".to_string(),
-    //             amount: Uint128::new(100),
-    //         }],
-    //     );
+        assert_eq!(
+            res.attributes[1].value,
+            "316.227766016837933299".to_string()
+        );
 
-    //     //no index update before update reward index
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.global_index, Decimal256::zero(),);
+        // change reward end time without any fund
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(200);
 
-    //     //update reward index
-    //     let msg = ExecuteMsg::UpdateRewardIndex {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(0),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //index updated after update reward index
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.global_index, Decimal256::one());
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        assert_eq!(
+            res.reward_end_time,
+            Timestamp::from_nanos(1671797619879305533)
+        );
 
-    //     //second bond
-    //     let info = mock_info(
-    //         "staker2",
-    //         &vec![Coin {
-    //             denom: "staked".to_string(),
-    //             amount: Uint128::new(200),
-    //         }],
-    //     );
-    //     let msg = ExecuteMsg::BondStake {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        // change reward end time with fund
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(200);
 
-    //     //update balance
-    //     deps.querier.update_balance(
-    //         env.contract.address.as_str(),
-    //         vec![Coin {
-    //             denom: "rewards".to_string(),
-    //             amount: Uint128::new(300),
-    //         }],
-    //     );
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //check global index before update
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.global_index, Decimal256::one());
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        assert_eq!(
+            res.reward_end_time,
+            Timestamp::from_nanos(1671797619879305533)
+        );
+        assert_eq!(
+            res.global_index,
+            Decimal256::from_str("632.139304267659028665").unwrap()
+        );
+        assert_eq!(res.reward_supply, Uint128::new(199800100));
+    }
 
-    //     //update distrubution index
-    //     let msg = ExecuteMsg::UpdateRewardIndex {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+    #[test]
+    pub fn test_update_reward_index() {
+        // instantiate
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        instantiate(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("creator", &[]),
+            init_msg,
+        )
+        .unwrap();
 
-    //     //check global index
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(
-    //         config_response.global_index,
-    //         Decimal256::from_ratio(Uint128::new(500), Uint128::new(300))
-    //     );
+        // update reward index no index update because no bond and rewards
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(res.attributes[1].value, "0".to_string());
 
-    //     //check prev_reward_balance of state which should be 300 after update
-    //     assert_eq!(config_response.prev_reward_balance, Uint128::new(300));
+        // bond
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //update balance
-    //     deps.querier.update_balance(
-    //         env.contract.address.as_str(),
-    //         vec![Coin {
-    //             denom: "rewards".to_string(),
-    //             amount: Uint128::new(500),
-    //         }],
-    //     );
-    //     //check prev_reward_balance of state which should be 300 before update
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.prev_reward_balance, Uint128::new(300));
+        // update reward index after bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(100);
+        let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
+        // still zero because no rewards is supplied
+        assert_eq!(res.attributes[1].value, "0".to_string());
 
-    //     //update distrubution index
-    //     let msg = ExecuteMsg::UpdateRewardIndex {};
-    //     let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        // fund reward
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(200);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-    //     //check prev_reward_balance of state which should be 500 after update
-    //     let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-    //     let config_response: StateResponse = from_binary(&res).unwrap();
-    //     assert_eq!(config_response.prev_reward_balance, Uint128::new(500));
-    // }
+        // update reward index after fund reward
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(100);
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        assert_eq!(
+            res.global_index,
+            Decimal256::from_str("313.065488356669553966").unwrap()
+        );
+        //
+        assert_eq!(res.reward_supply, Uint128::new(99901000));
+    }
+
+    #[test]
+    pub fn test_update_staker_rewards() {
+        // instantiate
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        instantiate(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("creator", &[]),
+            init_msg,
+        )
+        .unwrap();
+
+        // bond
+        let env = mock_env();
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // fund reward
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // update staker rewards
+        let info = mock_info("staker1", &[]);
+        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(500);
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        // query  staker
+        let res = query_staker_for_duration(env.clone(), deps.as_ref(), "staker1".to_string(), 10)
+            .unwrap();
+        // checking if the reward distrubuted is same as pending rewards of staker
+        let reward_to_staker1 = res.pending_rewards;
+        let rounded_reward =
+            Uint128::from_str(res.dec_rewards.to_uint_ceil().to_string().as_str()).unwrap();
+
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let reward_distrubuted = Uint128::new(100_000_000)
+            .checked_sub(res.reward_supply)
+            .unwrap();
+        assert_eq!(reward_to_staker1 + rounded_reward, reward_distrubuted);
+
+        // update one staker with multiple durations
+        // second bond
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let info = mock_info("stake_token_address", &vec![]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 20 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // update staker rewards
+        let info = mock_info("staker1", &[]);
+        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1500);
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        let rewards = res.attributes[2].value.parse::<u128>().unwrap();
+
+        // query  staker for all durations
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
+            .unwrap();
+
+        // query state
+        // checking if the reward distrubuted is same as pending rewards of staker
+        let reward_to_staker1 = res.positions[0].pending_rewards + res.positions[1].pending_rewards;
+        let rounded_reward = Uint128::from_str(
+            (res.positions[0].dec_rewards + res.positions[1].dec_rewards)
+                .to_uint_ceil()
+                .to_string()
+                .as_str(),
+        );
+        // query  state
+        let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+
+        let reward_distrubuted = Uint128::new(100_000_000)
+            .checked_sub(res.reward_supply)
+            .unwrap();
+        assert_eq!(
+            reward_to_staker1 + rounded_reward.unwrap(),
+            reward_distrubuted
+        );
+    }
     // #[test]
     // pub fn test_recieve_rewards() {
     //     let mut deps = mock_dependencies_with_balance(&[]);
@@ -626,7 +740,7 @@ mod tests {
     //     //random can't update config
     //     let info: MessageInfo = mock_info("random", &[]);
     //     let msg = ExecuteMsg::UpdateConfig {
-    //         reward_denom: Some("new_reward_denom".to_string()),
+    //         reward_token_address: Some("new_reward_token_address".to_string()),
     //         staked_token_denom: Some("new_staked_token_denom".to_string()),
     //         admin: Some("new_admin".to_string()),
     //     };
@@ -636,7 +750,7 @@ mod tests {
     //     //creator can update config
     //     let info: MessageInfo = mock_info("creator", &[]);
     //     let msg = ExecuteMsg::UpdateConfig {
-    //         reward_denom: Some("new_reward_denom".to_string()),
+    //         reward_token_address: Some("new_reward_token_address".to_string()),
     //         staked_token_denom: Some("new_staked_token_denom".to_string()),
     //         admin: Some("new_admin".to_string()),
     //     };
@@ -646,7 +760,7 @@ mod tests {
     //     let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
     //     let config_response: ConfigResponse = from_binary(&res).unwrap();
     //     assert_eq!(config_response.admin, "new_admin".to_string());
-    //     assert_eq!(config_response.reward_denom, "new_reward_denom".to_string());
+    //     assert_eq!(config_response.reward_token_address, "new_reward_token_address".to_string());
     //     assert_eq!(
     //         config_response.staked_token_denom,
     //         "new_staked_token_denom".to_string()

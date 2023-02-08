@@ -9,8 +9,8 @@ use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
 #[cw_serde]
 pub struct InstantiateMsg {
-    pub stake_denom: Addr,
-    pub reward_denom: Addr,
+    pub stake_token_address: String,
+    pub reward_token_address: String,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
@@ -42,8 +42,8 @@ pub enum ExecuteMsg {
 
     //Update config
     UpdateConfig {
-        staked_token_denom: Option<String>,
-        reward_denom: Option<String>,
+        stake_token_address: Option<String>,
+        reward_token_address: Option<String>,
         admin: Option<String>,
         fee_collector: Option<String>,
     },
@@ -53,7 +53,7 @@ pub enum ExecuteMsg {
 
 pub enum ReceiveMsg {
     Bond { duration_day: u128 },
-    RewardUpdate { duration: Duration },
+    RewardUpdate { reward_end_time: Timestamp },
 }
 
 #[cw_serde]
@@ -79,8 +79,8 @@ pub struct StateResponse {
 
 #[cw_serde]
 pub struct ConfigResponse {
-    pub staked_denom: String,
-    pub reward_denom: String,
+    pub stake_token_address: String,
+    pub reward_token_address: String,
     pub admin: String,
     pub fee_collector: String,
     pub force_claim_ratio: String,
