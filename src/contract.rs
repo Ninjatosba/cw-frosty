@@ -230,8 +230,7 @@ pub fn execute_bond(
             };
             let weight = Decimal256::from_ratio(duration, Uint128::one()).sqrt();
             state.total_weight = state.total_weight.add(weight);
-            println!("total weight {}", state.total_weight);
-            println!("rewards_supply {}", state.reward_supply);
+
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
     }
@@ -265,32 +264,34 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     if now > state.reward_end_time {
         now = state.reward_end_time;
     }
-    println!("now: {}", now.seconds());
-    println!("last_updated: {}", state.last_updated.seconds());
 
     // Time elapsed since last update
     let numerator = now
         .seconds()
         .checked_sub(state.last_updated.seconds())
         .unwrap();
-    println!("numerator: {}", numerator);
+
     // Time elapsed since start
     let denominator = state
         .reward_end_time
         .seconds()
         .checked_sub(state.start_time.seconds())
         .unwrap_or(1u64);
-    println!("denominator: {}", denominator);
+
     let new_dist_balance = state.reward_supply.multiply_ratio(numerator, denominator);
-    println!("new_dist_balance: {}", new_dist_balance);
+    println!("new dist balance: {}", new_dist_balance);
+
     let divider = state
         .total_weight
         .checked_mul(Decimal256::from_ratio(state.total_staked, Uint256::one()))?;
-    println!("divider: {}", divider);
+    println!("total weight: {}", state.total_weight);
+    println!("total staked: {}", state.total_staked);
+
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
-    println!("adding_index: {}", adding_index);
+    println!("adding index: {}", adding_index);
+
     state.reward_supply = state
         .reward_supply
         .checked_sub(new_dist_balance)
@@ -359,7 +360,6 @@ pub fn update_staker_rewards(
         Decimal256::from_ratio(stake_position.staked_amount, Uint128::one())
             .checked_mul(multiplier)?
             .checked_add(stake_position.dec_rewards)?;
-
     let decimals = get_decimals(new_distrubuted_reward)?;
 
     let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
