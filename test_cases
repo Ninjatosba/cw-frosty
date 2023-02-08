@@ -81,3 +81,24 @@
 
 // 2 days passed
 // 2/45 = 0.04444444444444444444444444444444*15000/30/0,11= 200
+
+// update staker rewards at 1000
+now: 1571798419
+global_index: Decimal256(3162.277660168379332997)
+index_diff: Decimal256(3162.277660168379332997)
+multiplier: Decimal256(9999.999999999999999997)
+rewards_uint128: 999999
+// update staker rewards at 2000
+now: 1571799419
+global_index: Decimal256(3817.206807583979363562)
+index_diff: Decimal256(654.929147415600030565)
+multiplier: Decimal256(2071.067811865475243845)
+rewards_uint128: 207107
+now: 1571799419
+global_index: Decimal256(3817.206807583979363562)
+index_diff: Decimal256(654.929147415600030565)
+multiplier: Decimal256(2928.932188134524756149)
+rewards_uint128: 292893
+thread 'tests::tests::test_update_staker_rewards' panicked at 'assertion failed: `(left == right)`
+  left: `Uint128(1500000)`,
+ right: `Uint128(2000000)`'

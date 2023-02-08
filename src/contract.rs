@@ -61,7 +61,8 @@ pub fn instantiate(
         total_staked: Uint128::zero(),
         total_weight: Decimal256::zero(),
         reward_end_time: env.block.time.plus_seconds(1),
-        reward_supply: Uint128::zero(),
+        total_reward_supply: Uint128::zero(),
+        total_reward_claimed: Uint128::zero(),
         start_time: env.block.time,
         last_updated: env.block.time,
     };
@@ -170,10 +171,13 @@ pub fn fund_reward(
     // update reward index so that we distrubute latest reward.
 
     update_reward_index(&mut state, env.block.time)?;
-    let unclaimed_reward = state.reward_supply;
+    let unclaimed_reward = state
+        .total_reward_supply
+        .checked_sub(state.total_reward_claimed)?;
     let new_reward_supply = unclaimed_reward + amount;
 
-    state.reward_supply = new_reward_supply;
+    state.total_reward_supply = new_reward_supply;
+    state.total_reward_claimed = Uint128::zero();
 
     state.reward_end_time = reward_end_time;
     // every time we fund reward we reset start time.
@@ -213,12 +217,29 @@ pub fn execute_bond(
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time);
             update_staker_rewards(&mut state, env.block.time, &mut staker)?;
+            // when adding to existing staker best way to do is calculate the new weight and add it to total weight after removing old weight.
             staker.staked_amount = staker.staked_amount.add(amount);
+            state.total_weight = state
+                .total_weight
+                .checked_sub(staker.position_weight)?
+                .checked_add(
+                    Decimal256::from_ratio(duration, Uint128::one())
+                        .sqrt()
+                        .checked_mul(Decimal256::from_ratio(
+                            staker.staked_amount,
+                            Uint128::one(),
+                        ))?,
+                )?;
+
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
         None => {
             // create new staker
             update_reward_index(&mut state, env.block.time);
+            let position_weight = Decimal256::from_ratio(duration, Uint128::one())
+                .sqrt()
+                .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
+
             let staker = StakePosition {
                 staked_amount: amount,
                 index: state.global_index,
@@ -227,9 +248,9 @@ pub fn execute_bond(
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),
                 last_claimed: env.block.time,
+                position_weight: position_weight,
             };
-            let weight = Decimal256::from_ratio(duration, Uint128::one()).sqrt();
-            state.total_weight = state.total_weight.add(weight);
+            state.total_weight = state.total_weight.add(position_weight);
 
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
@@ -278,23 +299,19 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .checked_sub(state.start_time.seconds())
         .unwrap_or(1u64);
 
-    let new_dist_balance = state.reward_supply.multiply_ratio(numerator, denominator);
-    println!("new dist balance: {}", new_dist_balance);
+    let new_dist_balance = state
+        .total_reward_supply
+        .multiply_ratio(numerator, denominator);
 
-    let divider = state
-        .total_weight
-        .checked_mul(Decimal256::from_ratio(state.total_staked, Uint256::one()))?;
-    println!("total weight: {}", state.total_weight);
-    println!("total staked: {}", state.total_staked);
+    let divider = state.total_weight;
 
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
-    println!("adding index: {}", adding_index);
 
-    state.reward_supply = state
-        .reward_supply
-        .checked_sub(new_dist_balance)
+    state.total_reward_claimed = state
+        .total_reward_claimed
+        .checked_add(new_dist_balance)
         .unwrap_or(Uint128::zero());
 
     state.global_index = state.global_index.add(adding_index);
@@ -333,6 +350,7 @@ pub fn execute_update_staker_rewards(
             reward
         })
         .sum();
+
     STATE.save(deps.storage, &state)?;
     let res = Response::new()
         .add_attribute("action", "update_stakers_rewards")
@@ -347,32 +365,30 @@ pub fn update_staker_rewards(
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
     //update reward index
+    println!("global_index: {:?}", state.global_index);
     update_reward_index(state, now)?;
-
-    let position_weight =
-        Decimal256::from_ratio(stake_position.unbond_duration_as_days, Uint128::one()).sqrt();
+    println!("now: {:?}", now.seconds());
+    println!("global_index: {:?}", state.global_index);
 
     let index_diff = state.global_index - stake_position.index;
+    println!("index_diff: {:?}", index_diff);
 
-    let multiplier = index_diff.checked_mul(position_weight)?;
-
-    let new_distrubuted_reward =
-        Decimal256::from_ratio(stake_position.staked_amount, Uint128::one())
-            .checked_mul(multiplier)?
-            .checked_add(stake_position.dec_rewards)?;
+    let new_distrubuted_reward = index_diff
+        .checked_mul(stake_position.position_weight)?
+        .checked_add(stake_position.dec_rewards)?;
     let decimals = get_decimals(new_distrubuted_reward)?;
 
     let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
         .try_into()
         .unwrap_or(Uint128::zero());
-
+    println!("rewards_uint128: {}", rewards_uint128);
     stake_position.dec_rewards = decimals;
     stake_position.pending_rewards = stake_position
         .pending_rewards
         .checked_add(rewards_uint128)?;
     stake_position.index = state.global_index;
     stake_position.last_claimed = now;
-    Ok(rewards_uint128)
+    Ok(stake_position.pending_rewards)
 }
 
 pub fn execute_receive_reward(
@@ -427,22 +443,28 @@ pub fn execute_unbond(
 
     staker.pending_rewards = Uint128::zero();
 
-    STAKERS.save(deps.storage, (&info.sender, duration), &staker)?;
-
     let unbond_amount = match amount {
         Some(amount) => {
             if staker.staked_amount < amount {
                 return Err(ContractError::InsufficientStakedAmount {});
             }
             staker.staked_amount = staker.staked_amount.checked_sub(amount)?;
-            STAKERS.save(deps.storage, (&info.sender, duration), &staker);
+            state.total_weight = state.total_weight.checked_sub(staker.position_weight)?;
+            let position_weight = Decimal256::from_ratio(duration, Uint128::one())
+                .sqrt()
+                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
+            staker.position_weight = position_weight;
+            state.total_weight = state.total_weight.checked_add(staker.position_weight)?;
+            STAKERS.save(deps.storage, (&info.sender, duration), &staker)?;
             amount
         }
         None => {
+            state.total_weight = state.total_weight.checked_sub(staker.position_weight)?;
             STAKERS.remove(deps.storage, (&info.sender, duration));
             staker.staked_amount
         }
     };
+    STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
 
     let claim = vec![Claim {
@@ -622,7 +644,8 @@ pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResp
         total_staked: state.total_staked,
         total_weight: state.total_weight,
         reward_end_time: state.reward_end_time,
-        reward_supply: state.reward_supply,
+        total_reward_supply: state.total_reward_supply,
+        total_reward_claimed: state.total_reward_claimed,
         start_time: state.start_time,
         last_updated: state.last_updated,
     })
