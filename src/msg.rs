@@ -72,7 +72,8 @@ pub struct StateResponse {
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
     pub reward_end_time: Timestamp,
-    pub reward_supply: Uint128,
+    pub total_reward_supply: Uint128,
+    pub total_reward_claimed: Uint128,
     pub start_time: Timestamp,
     pub last_updated: Timestamp,
 }

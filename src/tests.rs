@@ -270,9 +270,9 @@ mod tests {
         );
         assert_eq!(
             res.global_index,
-            Decimal256::from_str("632.139304267659028665").unwrap()
+            Decimal256::from_str("632.455532033675866598").unwrap()
         );
-        assert_eq!(res.reward_supply, Uint128::new(199800100));
+        assert_eq!(res.total_reward_supply, Uint128::new(199800000));
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
             Decimal256::from_str("313.065488356669553966").unwrap()
         );
         //
-        assert_eq!(res.reward_supply, Uint128::new(99901000));
+        assert_eq!(res.total_reward_claimed, Uint128::new(99000));
     }
 
     #[test]
@@ -386,7 +386,7 @@ mod tests {
         let info = mock_info("staker1", &[]);
         let msg = ExecuteMsg::UpdateStakersReward { address: None };
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(500);
+        env.block.time = env.block.time.plus_seconds(1000);
         let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
         // query  staker
         let res = query_staker_for_duration(env.clone(), deps.as_ref(), "staker1".to_string(), 10)
@@ -398,13 +398,12 @@ mod tests {
 
         // query  state
         let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
-        let reward_distrubuted = Uint128::new(100_000_000)
-            .checked_sub(res.reward_supply)
-            .unwrap();
+        let reward_distrubuted = res.total_reward_claimed;
         assert_eq!(reward_to_staker1 + rounded_reward, reward_distrubuted);
 
         // update one staker with multiple durations
         // second bond
+        //first 1000000 is for first bond
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(1000);
         let info = mock_info("stake_token_address", &vec![]);
@@ -419,7 +418,7 @@ mod tests {
         let info = mock_info("staker1", &[]);
         let msg = ExecuteMsg::UpdateStakersReward { address: None };
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1500);
+        env.block.time = env.block.time.plus_seconds(2000);
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
         let rewards = res.attributes[2].value.parse::<u128>().unwrap();
 
@@ -441,9 +440,7 @@ mod tests {
         // query  state
         let res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
 
-        let reward_distrubuted = Uint128::new(100_000_000)
-            .checked_sub(res.reward_supply)
-            .unwrap();
+        let reward_distrubuted = res.total_reward_claimed;
         assert_eq!(
             reward_to_staker1 + rounded_reward.unwrap(),
             reward_distrubuted

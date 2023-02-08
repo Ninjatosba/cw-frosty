@@ -13,7 +13,8 @@ pub struct State {
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
     pub reward_end_time: Timestamp,
-    pub reward_supply: Uint128,
+    pub total_reward_supply: Uint128,
+    pub total_reward_claimed: Uint128,
     pub start_time: Timestamp,
     pub last_updated: Timestamp,
 }
@@ -53,6 +54,7 @@ pub struct StakePosition {
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,
     pub last_claimed: Timestamp,
+    pub position_weight: Decimal256,
 }
 
 // REWARDS (holder_addr, cw20_addr) -> Holder
@@ -68,6 +70,7 @@ impl StakePosition {
             pending_rewards: Uint128::zero(),
             dec_rewards: Decimal256::zero(),
             last_claimed: bond_time,
+            position_weight: Decimal256::zero(),
         }
     }
 }
