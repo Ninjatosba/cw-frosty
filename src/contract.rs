@@ -230,6 +230,8 @@ pub fn execute_bond(
             };
             let weight = Decimal256::from_ratio(duration, Uint128::one()).sqrt();
             state.total_weight = state.total_weight.add(weight);
+            println!("total weight {}", state.total_weight);
+            println!("rewards_supply {}", state.reward_supply);
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
     }
@@ -330,7 +332,7 @@ pub fn execute_update_staker_rewards(
             reward
         })
         .sum();
-
+    STATE.save(deps.storage, &state)?;
     let res = Response::new()
         .add_attribute("action", "update_stakers_rewards")
         .add_attribute("address", addr)
