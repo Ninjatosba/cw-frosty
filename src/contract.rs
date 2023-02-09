@@ -373,12 +373,12 @@ pub fn update_staker_rewards(
     let index_diff = state.global_index - stake_position.index;
     println!("index_diff: {:?}", index_diff);
 
-    let new_distrubuted_reward = index_diff
+    let new_distributed_reward = index_diff
         .checked_mul(stake_position.position_weight)?
         .checked_add(stake_position.dec_rewards)?;
-    let decimals = get_decimals(new_distrubuted_reward)?;
+    let decimals = get_decimals(new_distributed_reward)?;
 
-    let rewards_uint128 = (new_distrubuted_reward * Uint256::one())
+    let rewards_uint128 = (new_distributed_reward * Uint256::one())
         .try_into()
         .unwrap_or(Uint128::zero());
     println!("rewards_uint128: {}", rewards_uint128);
