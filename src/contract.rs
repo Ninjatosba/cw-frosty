@@ -582,10 +582,13 @@ pub fn execute_force_claim(
     release_at: Timestamp,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
     }
+    println!("release_at: {:?}", claim[0].release_at);
+    println!("release_at_sent: {:?}", release_at);
+
     //find desired claim if not found return error
     let desired_claim: Claim = claim
         .clone()

@@ -849,6 +849,92 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    pub fn test_force_claim() {
+        // init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
+
+        // bond
+        let info = mock_info("stake_token_address", &vec![]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        //fund rewards
+        let info = mock_info("reward_token_address", &vec![]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // unbond
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(100)),
+            duration: 16,
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // force claim with wrong timestamp
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::ForceClaim {
+            unbond_time: Timestamp::from_seconds(env.block.time.seconds() + 1382401),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+        assert_eq!(res, ContractError::NoClaimForTimestamp {});
+
+        // force claim
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::ForceClaim {
+            unbond_time: Timestamp::from_nanos(1573180819879305533),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "stake_token_address".to_string(),
+                funds: vec![],
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "fee_collector".to_string(),
+                    amount: Uint128::new(10),
+                })
+                .unwrap(),
+            })
+        );
+        assert_eq!(
+            res.messages[1].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "stake_token_address".to_string(),
+                funds: vec![],
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "staker1".to_string(),
+                    amount: Uint128::new(90),
+                })
+                .unwrap(),
+            })
+        );
+    }
     // #[test]
     // pub fn test_update_holders_rewards() {
     //     let mut deps = mock_dependencies_with_balance(&[]);
