@@ -42,10 +42,9 @@ pub enum ExecuteMsg {
 
     //Update config
     UpdateConfig {
-        stake_token_address: Option<String>,
-        reward_token_address: Option<String>,
         admin: Option<String>,
         fee_collector: Option<String>,
+        force_claim_ratio: Option<Decimal>,
     },
 }
 

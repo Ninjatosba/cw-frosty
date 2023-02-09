@@ -103,19 +103,10 @@ pub fn execute(
         ExecuteMsg::ClaimUnbonded {} => execute_claim(deps, env, info),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
         ExecuteMsg::UpdateConfig {
-            stake_token_address,
-            reward_token_address,
             admin,
             fee_collector,
-        } => execute_update_config(
-            deps,
-            env,
-            info,
-            stake_token_address,
-            reward_token_address,
-            fee_collector,
-            admin,
-        ),
+            force_claim_ratio,
+        } => execute_update_config(deps, env, info, force_claim_ratio, fee_collector, admin),
         ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
     }
 }
@@ -506,8 +497,7 @@ pub fn execute_update_config(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    stake_token_address: Option<String>,
-    reward_token_address: Option<String>,
+    force_claim_ratio: Option<Decimal>,
     fee_collector: Option<String>,
     admin: Option<String>,
 ) -> Result<Response, ContractError> {
@@ -515,11 +505,8 @@ pub fn execute_update_config(
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
-    if let Some(stake_token_address) = stake_token_address {
-        config.stake_token_address = deps.api.addr_validate(&stake_token_address)?;
-    }
-    if let Some(reward_token_address) = reward_token_address {
-        config.reward_token_address = deps.api.addr_validate(&reward_token_address)?;
+    if let Some(force_claim_ratio) = force_claim_ratio {
+        config.force_claim_ratio = force_claim_ratio;
     }
     if let Some(fee_collector) = fee_collector {
         config.fee_collector = deps.api.addr_validate(&fee_collector)?;
