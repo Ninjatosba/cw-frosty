@@ -1,9 +1,7 @@
-use cosmwasm_schema::cw_serde;
-
-use cosmwasm_std::{ConversionOverflowError, DivideByZeroError, OverflowError, StdError, Uint128};
+use cosmwasm_std::{OverflowError, StdError, Uint128};
 use cw_asset::AssetError;
 use cw_utils::PaymentError;
-use std::convert::Infallible;
+
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -79,9 +77,7 @@ pub enum ContractError {
 }
 
 impl From<AssetError> for ContractError {
-    fn from(err: AssetError) -> Self {
-        match err {
-            _ => ContractError::AssetError {},
-        }
+    fn from(_err: AssetError) -> Self {
+        ContractError::AssetError {}
     }
 }

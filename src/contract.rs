@@ -1,35 +1,27 @@
 use cosmwasm_std::{from_slice, Api};
 use cosmwasm_std::{
-    to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Decimal256, Deps, DepsMut, Env,
-    Fraction, Isqrt, MessageInfo, Order, Response, StdError, StdResult, Timestamp, Uint128,
-    Uint256,
+    to_binary, Addr, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo, Order,
+    Response, StdResult, Timestamp, Uint128, Uint256,
 };
-use cw0::{maybe_addr, PaymentError};
-use cw20::{Cw20CoinVerified, Cw20Contract};
-use cw20::{Cw20QueryMsg, Cw20ReceiveMsg};
+use cw0::maybe_addr;
+
+use cw20::Cw20ReceiveMsg;
 use cw_asset::Asset;
-use cw_storage_plus::Bound;
 
-use cw_utils::must_pay;
-
-use serde::de;
-use std::time::Duration;
 use std::vec;
 
-use crate::helper::{self, days_to_seconds, get_decimals};
+use crate::helper::{days_to_seconds, get_decimals};
 use crate::msg::{
-    AccruedRewardsResponse, ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg,
-    ListClaimsResponse, MigrateMsg, QueryMsg, ReceiveMsg, StakerForAllDurationResponse,
-    StakerResponse, StateResponse,
+    ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, ListClaimsResponse, MigrateMsg,
+    QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    self, CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
+    CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
 use std::convert::TryInto;
 use std::ops::Add;
-use std::str::FromStr;
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -49,8 +41,8 @@ pub fn instantiate(
 
     let config = Config {
         admin: admin.clone(),
-        stake_token_address: stake_token_address,
-        reward_token_address: reward_token_address,
+        stake_token_address,
+        reward_token_address,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
     };
@@ -69,7 +61,7 @@ pub fn instantiate(
     STATE.save(deps.storage, &state)?;
     let res = Response::default()
         .add_attribute("method", "instantiate")
-        .add_attribute("admin", admin.clone())
+        .add_attribute("admin", admin)
         .add_attribute(
             "stake_token_address",
             config.stake_token_address.to_string(),
@@ -119,7 +111,7 @@ pub fn execute_receive(
     wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
-    let config = CONFIG.load(deps.storage)?;
+    let _config = CONFIG.load(deps.storage)?;
     // TODO: check sender any contract that send cw20 token to this contract can execute this function
     let api = deps.api;
     let balance = CW20Balance {
@@ -203,10 +195,10 @@ pub fn execute_bond(
     }
     let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
-    let mut staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
+    let staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
     match staker {
         Some(mut staker) => {
-            update_reward_index(&mut state, env.block.time);
+            update_reward_index(&mut state, env.block.time)?;
             update_staker_rewards(&mut state, env.block.time, &mut staker)?;
             // when adding to existing staker best way to do is calculate the new weight and add it to total weight after removing old weight.
             staker.staked_amount = staker.staked_amount.add(amount);
@@ -229,7 +221,7 @@ pub fn execute_bond(
         }
         None => {
             // create new staker
-            update_reward_index(&mut state, env.block.time);
+            update_reward_index(&mut state, env.block.time)?;
             let position_weight = Decimal256::from_ratio(duration, Uint128::one())
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
@@ -242,7 +234,7 @@ pub fn execute_bond(
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),
                 last_claimed: env.block.time,
-                position_weight: position_weight,
+                position_weight,
             };
             state.total_weight = state.total_weight.add(position_weight);
 
@@ -316,7 +308,7 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
 
 pub fn execute_update_staker_rewards(
     deps: DepsMut,
-    mut env: Env,
+    env: Env,
     info: MessageInfo,
     address: Option<String>,
 ) -> Result<Response, ContractError> {
@@ -390,7 +382,7 @@ pub fn update_staker_rewards(
 }
 
 pub fn execute_receive_reward(
-    mut deps: DepsMut,
+    deps: DepsMut,
     env: Env,
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
@@ -427,7 +419,7 @@ pub fn execute_receive_reward(
 }
 
 pub fn execute_unbond(
-    mut deps: DepsMut,
+    deps: DepsMut,
     env: Env,
     info: MessageInfo,
     amount: Option<Uint128>,
@@ -523,7 +515,7 @@ pub fn execute_claim(
     env: Env,
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
+    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
     let config = CONFIG.load(deps.storage)?;
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
@@ -544,7 +536,7 @@ pub fn execute_claim(
         total_claim += claim.amount;
     }
     //remove mature claims from claim vector
-    let mut new_claims: Vec<Claim> = claim
+    let new_claims: Vec<Claim> = claim
         .into_iter()
         .filter(|claim| claim.release_at > env.block.time)
         .collect();
@@ -569,7 +561,7 @@ pub fn execute_force_claim(
     release_at: Timestamp,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
+    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
     }
@@ -584,8 +576,7 @@ pub fn execute_force_claim(
         .ok_or(ContractError::NoClaimForTimestamp {})?;
 
     //remove desired claim from claim vector
-    let mut new_claims: Vec<Claim> = claim
-        .clone()
+    let new_claims: Vec<Claim> = claim
         .into_iter()
         .filter(|claim| claim.release_at != release_at)
         .collect();
@@ -615,7 +606,7 @@ pub fn execute_force_claim(
     let cut_asset = Asset::cw20(config.stake_token_address.clone(), cut_amount);
     let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
     //send claim_amount to user
-    let claim_asset = Asset::cw20(config.stake_token_address.clone(), claim_amount);
+    let claim_asset = Asset::cw20(config.stake_token_address, claim_amount);
     let claim_message = claim_asset.transfer_msg(info.sender)?;
 
     let res = Response::new()
@@ -626,7 +617,7 @@ pub fn execute_force_claim(
         .add_attribute("cut_amount", cut_amount.to_string());
     Ok(res)
 }
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[cfg(not(feature = "library"))]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
@@ -689,7 +680,7 @@ pub fn query_staker_for_duration(
     address: String,
     duration: u128,
 ) -> StdResult<StakerResponse> {
-    let addr = deps.api.addr_validate(&address.as_str())?;
+    let addr = deps.api.addr_validate(address.as_str())?;
     let staker = STAKERS.load(deps.storage, (&addr, duration))?;
 
     Ok(StakerResponse {
@@ -715,8 +706,9 @@ pub fn query_staker_for_all_duration(
         .prefix(&addr)
         .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
-            let (key, value) = item.unwrap();
-            let response = StakerResponse {
+            let (_key, value) = item.unwrap();
+
+            StakerResponse {
                 staked_amount: value.staked_amount,
                 index: value.index,
                 bond_time: value.bond_time,
@@ -725,17 +717,14 @@ pub fn query_staker_for_all_duration(
                 dec_rewards: value.dec_rewards,
                 last_claimed: value.last_claimed,
                 position_weight: value.position_weight,
-            };
-            response
+            }
         })
         .collect();
 
-    Ok(StakerForAllDurationResponse {
-        positions: positions,
-    })
+    Ok(StakerForAllDurationResponse { positions })
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[cfg(not(feature = "library"))]
 pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     Ok(Response::default())
 }
