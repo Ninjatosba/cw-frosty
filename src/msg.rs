@@ -112,6 +112,7 @@ pub struct StakerResponse {
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,
     pub last_claimed: Timestamp,
+    pub position_weight: Decimal256,
 }
 
 #[cw_serde]

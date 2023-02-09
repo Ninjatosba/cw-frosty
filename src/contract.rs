@@ -230,6 +230,9 @@ pub fn execute_bond(
                             Uint128::one(),
                         ))?,
                 )?;
+            staker.position_weight = Decimal256::from_ratio(duration, Uint128::one())
+                .sqrt()
+                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
 
             STAKERS.save(deps.storage, (&sender, duration), &staker)?;
         }
@@ -700,6 +703,7 @@ pub fn query_staker_for_duration(
         pending_rewards: staker.pending_rewards,
         dec_rewards: staker.dec_rewards,
         last_claimed: staker.last_claimed,
+        position_weight: staker.position_weight,
     })
 }
 //query all holders list
@@ -723,6 +727,7 @@ pub fn query_staker_for_all_duration(
                 pending_rewards: value.pending_rewards,
                 dec_rewards: value.dec_rewards,
                 last_claimed: value.last_claimed,
+                position_weight: value.position_weight,
             };
             response
         })
