@@ -285,7 +285,6 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     if now > state.reward_end_time {
         now = state.reward_end_time;
     }
-
     // Time elapsed since last update
     let numerator = now
         .seconds()
@@ -302,8 +301,9 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     let new_dist_balance = state
         .total_reward_supply
         .multiply_ratio(numerator, denominator);
-
+    println!("new_dist_balance: {}", new_dist_balance);
     let divider = state.total_weight;
+    println!("divider: {}", divider);
 
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
@@ -337,6 +337,7 @@ pub fn execute_update_staker_rewards(
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
+        .filter(|(staker, _)| staker.0 == addr)
         .map(|(_, mut staker)| {
             let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)
                 .unwrap_or(Uint128::zero());
@@ -365,13 +366,17 @@ pub fn update_staker_rewards(
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
     //update reward index
-    println!("global_index: {:?}", state.global_index);
+
     update_reward_index(state, now)?;
-    println!("now: {:?}", now.seconds());
-    println!("global_index: {:?}", state.global_index);
 
     let index_diff = state.global_index - stake_position.index;
-    println!("index_diff: {:?}", index_diff);
+    //stake_position.position_weight
+    println!("stake_position.index: {:?}", stake_position.index);
+    println!("state.global_index: {:?}", state.global_index);
+    println!(
+        "stake_position.position_weight: {:?}",
+        stake_position.position_weight
+    );
 
     let new_distributed_reward = index_diff
         .checked_mul(stake_position.position_weight)?
@@ -381,7 +386,6 @@ pub fn update_staker_rewards(
     let rewards_uint128 = (new_distributed_reward * Uint256::one())
         .try_into()
         .unwrap_or(Uint128::zero());
-    println!("rewards_uint128: {}", rewards_uint128);
     stake_position.dec_rewards = decimals;
     stake_position.pending_rewards = stake_position
         .pending_rewards
@@ -403,6 +407,7 @@ pub fn execute_receive_reward(
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
+        .filter(|(staker, _)| staker.0 == info.sender)
         .map(|(_, mut staker)| {
             let reward = update_staker_rewards(&mut state, env.block.time, &mut staker).unwrap();
             staker.pending_rewards = Uint128::zero();
