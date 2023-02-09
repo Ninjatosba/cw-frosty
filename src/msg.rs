@@ -36,7 +36,7 @@ pub enum ExecuteMsg {
         duration: u128,
     },
 
-    ClaimUnbounded {},
+    ClaimUnbonded {},
 
     ReceiveReward {},
 

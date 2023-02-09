@@ -100,7 +100,7 @@ pub fn execute(
         ExecuteMsg::UnbondStake { amount, duration } => {
             execute_unbond(deps, env, info, amount, duration)
         }
-        ExecuteMsg::ClaimUnbounded {} => execute_claim(deps, env, info),
+        ExecuteMsg::ClaimUnbonded {} => execute_claim(deps, env, info),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
         ExecuteMsg::UpdateConfig {
             stake_token_address,
@@ -444,6 +444,7 @@ pub fn execute_unbond(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
+    println!("env.block.time!!!: {:?}", env.block.time.seconds());
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
 
@@ -475,12 +476,17 @@ pub fn execute_unbond(
     state.total_staked = state.total_staked.checked_sub(unbond_amount)?;
     STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
+    println!("duration_as_sec: {:?}", duration_as_sec);
 
     let claim = vec![Claim {
         amount: unbond_amount,
         release_at: env.block.time.plus_seconds(duration_as_sec),
         unbond_at: env.block.time,
     }];
+    println!(
+        "env.block.time: {:?}",
+        env.block.time.plus_seconds(duration_as_sec).seconds()
+    );
     CLAIMS.save(deps.storage, &info.sender, &claim)?;
 
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
@@ -530,7 +536,7 @@ pub fn execute_claim(
     env: Env,
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
-    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or(vec![]);
     let config = CONFIG.load(deps.storage)?;
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
