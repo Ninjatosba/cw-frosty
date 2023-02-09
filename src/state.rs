@@ -1,11 +1,7 @@
 use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
 
-
 use cosmwasm_schema::cw_serde;
 use cw_storage_plus::{Item, Map};
-
-
-
 
 #[cw_serde]
 pub struct State {

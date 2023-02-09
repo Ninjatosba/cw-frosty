@@ -89,7 +89,7 @@ mod tests {
         let init_msg = default_init();
         let env = mock_env();
         let info = mock_info("creator", &[]);
-        instantiate(deps.as_mut(), env.clone(), info, init_msg);
+        instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
 
         //bond with no funds
         let info = mock_info("stake_token_address", &[]);

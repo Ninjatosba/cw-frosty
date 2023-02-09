@@ -1,4 +1,4 @@
-use cosmwasm_std::{from_slice, Api};
+use cosmwasm_std::from_slice;
 use cosmwasm_std::{
     to_binary, Addr, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo, Order,
     Response, StdResult, Timestamp, Uint128, Uint256,
@@ -23,8 +23,6 @@ use cosmwasm_std;
 use std::convert::TryInto;
 use std::ops::Add;
 
-#[cfg(not(feature = "library"))]
-use cosmwasm_std::entry_point;
 pub fn instantiate(
     deps: DepsMut,
     env: Env,
