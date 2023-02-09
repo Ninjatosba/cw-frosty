@@ -444,7 +444,7 @@ pub fn execute_unbond(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
-    // TODO return error if no position found
+
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
 
     let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)?;
@@ -472,6 +472,7 @@ pub fn execute_unbond(
             staker.staked_amount
         }
     };
+    state.total_staked = state.total_staked.checked_sub(unbond_amount)?;
     STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
 
