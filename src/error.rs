@@ -1,5 +1,7 @@
 use cosmwasm_std::{OverflowError, StdError, Uint128};
+use cw_asset::AssetError;
 use cw_utils::PaymentError;
+
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -15,6 +17,9 @@ pub enum ContractError {
 
     #[error("No rewards accrued")]
     NoRewards {},
+
+    #[error("Reward end time cannot be in the past")]
+    InvalidRewardEndTime {},
 
     #[error("Unauthorized")]
     Unauthorized {},
@@ -66,4 +71,13 @@ pub enum ContractError {
 
     #[error("Withdraw amount is higher than the bonded amount")]
     InsufficientStakedAmount {},
+
+    #[error("Asset error")]
+    AssetError {},
+}
+
+impl From<AssetError> for ContractError {
+    fn from(_err: AssetError) -> Self {
+        ContractError::AssetError {}
+    }
 }

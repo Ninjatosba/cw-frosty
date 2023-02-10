@@ -1,22 +1,19 @@
-use crate::denom::Denom;
+use cosmwasm_schema::cw_serde;
 use cw20::Cw20ReceiveMsg;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
-use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
+use cosmwasm_std::{Decimal, Decimal256, Timestamp, Uint128};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct InstantiateMsg {
-    pub stake_denom: Denom,
-    pub reward_denom: Denom,
+    pub stake_token_address: String,
+    pub reward_token_address: String,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[cw_serde]
+
 pub enum ExecuteMsg {
     ////////////////////
     /// Owner's operations
@@ -24,98 +21,99 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     /// Update the reward index
     UpdateRewardIndex {},
-
-    FundReward {
-        end_time: Duration,
-    },
     ForceClaim {
         unbond_time: Timestamp,
     },
     UpdateStakersReward {
         address: Option<String>,
     },
-    ////////////////////
-    /// Staking operations
-    ///////////////////
-    Bond {
-        unbonding_duration: Duration,
-    },
-    /// Set current reward index to global index
     UnbondStake {
         amount: Option<Uint128>,
-        duration: Duration,
+        duration: u128,
     },
 
-    ClaimUnbounded {},
+    ClaimUnbonded {},
 
     ReceiveReward {},
 
     //Update config
     UpdateConfig {
-        staked_token_denom: Option<Denom>,
-        reward_denom: Option<Denom>,
         admin: Option<String>,
+        fee_collector: Option<String>,
+        force_claim_ratio: Option<Decimal>,
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[cw_serde]
+
 pub enum ReceiveMsg {
-    Bond { duration: Duration },
-    RewardUpdate { duration: Duration },
+    Bond { duration_day: u128 },
+    RewardUpdate { reward_end_time: Timestamp },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[cw_serde]
 pub enum QueryMsg {
     State {},
     Config {},
-    ClaimableRewards {
-        address: String,
-    },
-    StakerInfo {
-        address: String,
-    },
-    ListClaims {
-        address: String,
-    },
-    ListStakers {
-        start_after: Option<String>,
-        limit: Option<u32>,
-    },
+    StakerForDuration { address: String, duration: u128 },
+    StakerForAllDuration { address: String },
+
+    ListClaims { address: String },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct StateResponse {
     pub global_index: Decimal256,
     pub total_staked: Uint128,
-    pub prev_reward_balance: Uint128,
-}
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ConfigResponse {
-    pub staked_denom: Denom,
-    pub reward_denom: Denom,
-    pub admin: Addr,
+    pub total_weight: Decimal256,
+    pub reward_end_time: Timestamp,
+    pub total_reward_supply: Uint128,
+    pub total_reward_claimed: Uint128,
+    pub start_time: Timestamp,
+    pub last_updated: Timestamp,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
+pub struct ConfigResponse {
+    pub stake_token_address: String,
+    pub reward_token_address: String,
+    pub admin: String,
+    pub fee_collector: String,
+    pub force_claim_ratio: String,
+}
+
+#[cw_serde]
 pub struct AccruedRewardsResponse {
     pub rewards: Uint128,
 }
+#[cw_serde]
+pub struct ClaimResponse {
+    pub amount: Uint128,
+    pub release_at: Timestamp,
+    pub unbond_at: Timestamp,
+}
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct HolderResponse {
-    pub address: String,
-    pub balance: Uint128,
+#[cw_serde]
+pub struct ListClaimsResponse {
+    pub claims: Vec<ClaimResponse>,
+}
+
+#[cw_serde]
+pub struct StakerResponse {
+    pub staked_amount: Uint128,
     pub index: Decimal256,
+    pub bond_time: Timestamp,
+    pub unbond_duration_as_days: u128,
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,
+    pub last_claimed: Timestamp,
+    pub position_weight: Decimal256,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct HoldersResponse {
-    pub holders: Vec<HolderResponse>,
+#[cw_serde]
+pub struct StakerForAllDurationResponse {
+    pub positions: Vec<StakerResponse>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct MigrateMsg {}

@@ -1,11 +1,11 @@
 [package]
-name = "cw-share"
+name = "cw-frosty"
 version = "0.1.1"
 authors = ["Deniz <deniz@deuslabs.fi>"]
-edition = "2018"
-description= "native token reward distribution smart contract based on stake"
+edition = "2021"
+description= ""
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/CosmWasm/cw-tokens/contracts/cw20-reward"
+repository = "https://github.com/Ninjatosba/cw-frosty"
 exclude = [
   "contract.wasm",
   "hash.txt",
@@ -21,13 +21,13 @@ library = []
 
 [dependencies]
 cw0 = "0.10"
-cosmwasm-schema = "1.1.5"
-cw20 = "0.11"
+cosmwasm-schema = "1.1.9"
+cw20 = "1.0.1"
 cosmwasm-std = "1.1.5"
-cw-storage-plus = "0.16.0"
-cw-controllers = "0.16.0"
-cw-utils = "0.16.0"
-cw-asset= "2.4.0"
+cw-storage-plus = "1.0.1"
+cw-controllers = "1.0.1"
+cw-utils = "1.0.1"
+cw-asset= "3.0.0"
 getrandom = { version = "0.2.8", features = ["js"] }
 schemars = "0.8.11"
 serde = { version = "1.0.147", default-features = false, features = ["derive"] }
