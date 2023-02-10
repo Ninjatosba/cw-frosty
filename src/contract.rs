@@ -110,7 +110,6 @@ pub fn execute_receive(
 ) -> Result<Response, ContractError> {
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
     let _config = CONFIG.load(deps.storage)?;
-    // TODO: check sender any contract that send cw20 token to this contract can execute this function
     let api = deps.api;
     let balance = CW20Balance {
         denom: info.sender,
@@ -285,9 +284,8 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     let new_dist_balance = state
         .total_reward_supply
         .multiply_ratio(numerator, denominator);
-    println!("new_dist_balance: {}", new_dist_balance);
+
     let divider = state.total_weight;
-    println!("divider: {}", divider);
 
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
@@ -316,7 +314,6 @@ pub fn execute_update_staker_rewards(
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
     }
-    // TODO: Check is its OK
     let rewards: Uint128 = STAKERS
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
@@ -354,13 +351,6 @@ pub fn update_staker_rewards(
     update_reward_index(state, now)?;
 
     let index_diff = state.global_index - stake_position.index;
-    //stake_position.position_weight
-    println!("stake_position.index: {:?}", stake_position.index);
-    println!("state.global_index: {:?}", state.global_index);
-    println!(
-        "stake_position.position_weight: {:?}",
-        stake_position.position_weight
-    );
 
     let new_distributed_reward = index_diff
         .checked_mul(stake_position.position_weight)?
@@ -425,7 +415,6 @@ pub fn execute_unbond(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
-    println!("env.block.time!!!: {:?}", env.block.time.seconds());
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
 
@@ -457,17 +446,12 @@ pub fn execute_unbond(
     state.total_staked = state.total_staked.checked_sub(unbond_amount)?;
     STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
-    println!("duration_as_sec: {:?}", duration_as_sec);
 
     let claim = vec![Claim {
         amount: unbond_amount,
         release_at: env.block.time.plus_seconds(duration_as_sec),
         unbond_at: env.block.time,
     }];
-    println!(
-        "env.block.time: {:?}",
-        env.block.time.plus_seconds(duration_as_sec).seconds()
-    );
     CLAIMS.save(deps.storage, &info.sender, &claim)?;
 
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
@@ -477,7 +461,7 @@ pub fn execute_unbond(
         .add_message(reward_msg)
         .add_attribute("action", "unbond")
         .add_attribute("address", info.sender)
-        .add_attribute("amount", amount.unwrap_or_default().to_string())
+        .add_attribute("amount", unbond_amount)
         .add_attribute("duration", duration.to_string());
 
     Ok(res)
@@ -531,7 +515,7 @@ pub fn execute_claim(
     //sum mature claims
     let mut total_claim: Uint128 = Uint128::zero();
     for claim in mature_claims.iter() {
-        total_claim += claim.amount;
+        total_claim = total_claim.checked_add(claim.amount)?;
     }
     //remove mature claims from claim vector
     let new_claims: Vec<Claim> = claim
@@ -563,8 +547,6 @@ pub fn execute_force_claim(
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
     }
-    println!("release_at: {:?}", claim[0].release_at);
-    println!("release_at_sent: {:?}", release_at);
 
     //find desired claim if not found return error
     let desired_claim: Claim = claim

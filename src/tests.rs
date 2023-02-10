@@ -101,6 +101,16 @@ mod tests {
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(res, ContractError::NoFund {});
 
+        // bond with wrong stake token
+        let info = mock_info("wrong_stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(res, ContractError::InvalidCw20TokenAddress {});
+
         //bond with funds
         let info = mock_info(
             "stake_token_address",
@@ -185,6 +195,18 @@ mod tests {
         });
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(res, ContractError::InvalidRewardEndTime {});
+        // fund reward with wrong sender
+        let info = mock_info("wrong_cw20_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(res, ContractError::InvalidCw20TokenAddress {});
 
         // update_reward_index before fund_reward
         let info = mock_info("creator", &[]);
@@ -357,6 +379,12 @@ mod tests {
         let init_msg = default_init();
         let env = mock_env();
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
+
+        // update staker rewards with no bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(res, ContractError::NoBond {});
 
         // bond
         let env = mock_env();
