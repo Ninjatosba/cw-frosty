@@ -55,18 +55,3 @@ pub struct StakePosition {
 
 // REWARDS (holder_addr, cw20_addr) -> Holder
 pub const STAKERS: Map<(&Addr, u128), StakePosition> = Map::new("stakers");
-
-impl StakePosition {
-    pub fn new(staked_amount: Uint128, bond_time: Timestamp, unbond_duration: u128) -> Self {
-        Self {
-            staked_amount,
-            index: Decimal256::zero(),
-            bond_time,
-            unbond_duration_as_days: unbond_duration,
-            pending_rewards: Uint128::zero(),
-            dec_rewards: Decimal256::zero(),
-            last_claimed: bond_time,
-            position_weight: Decimal256::zero(),
-        }
-    }
-}
