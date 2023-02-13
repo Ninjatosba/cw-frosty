@@ -28,14 +28,19 @@ pub fn instantiate(
     env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
+    // validate admin address
     let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
     // validate fee_collector address
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
-
+    // validate stake_token_address
     let stake_token_address = deps.api.addr_validate(&msg.stake_token_address)?;
-
+    // validate reward_token_address
     let reward_token_address = deps.api.addr_validate(&msg.reward_token_address)?;
+    // validate max_bond_duration
+    if msg.max_bond_duration < 1 {
+        return Err(ContractError::InvalidMaxBondDuration {});
+    }
 
     let config = Config {
         admin: admin.clone(),
@@ -43,6 +48,7 @@ pub fn instantiate(
         reward_token_address,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
+        max_bond_duration: msg.max_bond_duration,
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -109,7 +115,6 @@ pub fn execute_receive(
     wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
-    let _config = CONFIG.load(deps.storage)?;
     let api = deps.api;
     let balance = CW20Balance {
         denom: info.sender,
@@ -183,6 +188,10 @@ pub fn execute_bond(
     // check denom
     if balance.denom != cfg.stake_token_address {
         return Err(ContractError::InvalidCw20TokenAddress {});
+    }
+    // check duration
+    if duration < 1 || duration > cfg.max_bond_duration {
+        return Err(ContractError::InvalidBondDuration {});
     }
 
     let amount = balance.amount;
