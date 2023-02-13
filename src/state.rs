@@ -1,7 +1,9 @@
-use cosmwasm_std::{Addr, Decimal, Decimal256, Timestamp, Uint128};
+use cosmwasm_std::{
+    Addr, Decimal, Decimal256, Order, StdResult, Storage, Timestamp, Uint128, Uint64,
+};
 
 use cosmwasm_schema::cw_serde;
-use cw_storage_plus::{Item, Map};
+use cw_storage_plus::{Bound, Item, Map, PrefixBound};
 
 #[cw_serde]
 pub struct State {
@@ -15,6 +17,8 @@ pub struct State {
     pub last_updated: Timestamp,
 }
 
+pub const STATE: Item<State> = Item::new("state");
+
 #[cw_serde]
 pub struct Claim {
     pub amount: Uint128,
@@ -22,9 +26,81 @@ pub struct Claim {
     pub unbond_at: Timestamp,
 }
 
-pub const STATE: Item<State> = Item::new("state");
-pub const CLAIMS: Map<&Addr, Vec<Claim>> = Map::new("claims");
+pub const CLAIMS_KEY: &str = "claim";
+// Claims is a wrapper around map of (address, release_at, id) -> Claim
+pub struct Claims<'a>(Map<'a, (Addr, u64, u16), Claim>);
 
+impl<'a> Claims<'a> {
+    pub const fn new(storage_key: &'a str) -> Self {
+        Claims(Map::new(storage_key))
+    }
+
+    pub fn save(
+        &self,
+        store: &mut dyn Storage,
+        address: Addr,
+        release_at: u64,
+        claim: &Claim,
+    ) -> StdResult<()> {
+        let last_id = self
+            .0
+            .prefix((address.clone(), release_at))
+            .range(store, None, None, Order::Descending)
+            .next()
+            .transpose()?
+            .map(|(id, _)| id)
+            .unwrap_or(0);
+
+        self.0
+            .save(store, (address, release_at, last_id + 1), claim)
+    }
+
+    pub fn load(
+        &self,
+        store: &dyn Storage,
+        address: Addr,
+        release_at: u64,
+    ) -> StdResult<Vec<Claim>> {
+        self.0
+            .prefix((address, release_at))
+            .range(store, None, None, Order::Ascending)
+            .map(|x| x.map(|(_, v)| v))
+            .collect()
+    }
+
+    pub fn load_mature_claims(
+        &self,
+        store: &dyn Storage,
+        address: Addr,
+        release_at: u64,
+    ) -> StdResult<Vec<Claim>> {
+        self.0
+            .sub_prefix(address)
+            .range(
+                store,
+                Some(Bound::inclusive((release_at, 0))),
+                None,
+                Order::Ascending,
+            )
+            .map(|x| x.map(|(_, v)| v))
+            .collect::<StdResult<Vec<_>>>()
+    }
+
+    pub fn remove_mature_claims(&self, store: &mut dyn Storage, address: Addr, release_at: u64) {
+        self.0
+            .sub_prefix(address.clone())
+            .range(
+                store,
+                Some(Bound::inclusive((release_at, 0))),
+                None,
+                Order::Ascending,
+            )
+            .map(|x| x.map(|(k, v)| k))
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .for_each(|k| self.0.remove(store, (address, k.0, k.1)));
+    }
+}
 #[cw_serde]
 pub struct Config {
     pub admin: Addr,

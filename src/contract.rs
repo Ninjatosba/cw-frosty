@@ -16,10 +16,11 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
+    CW20Balance, Claim, Claims, Config, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
+use cw_storage_plus::Bound;
 use std::convert::TryInto;
 use std::ops::Add;
 
@@ -74,7 +75,6 @@ pub fn instantiate(
 }
 
 #[cfg(not(feature = "library"))]
-
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -347,7 +347,6 @@ pub fn update_staker_rewards(
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
     //update reward index
-
     update_reward_index(state, now)?;
 
     let index_diff = state.global_index - stake_position.index;
@@ -378,10 +377,10 @@ pub fn execute_receive_reward(
     let config = CONFIG.load(deps.storage)?;
 
     let rewards: Uint128 = STAKERS
+        .prefix(&info.sender)
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
-        .filter(|(staker, _)| staker.0 == info.sender)
         .map(|(_, mut staker)| {
             let reward = update_staker_rewards(&mut state, env.block.time, &mut staker).unwrap();
             staker.pending_rewards = Uint128::zero();
@@ -447,12 +446,19 @@ pub fn execute_unbond(
     STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
 
-    let claim = vec![Claim {
+    let release_at = env.block.time.plus_seconds(duration_as_sec);
+    let claim = Claim {
         amount: unbond_amount,
-        release_at: env.block.time.plus_seconds(duration_as_sec),
+        release_at,
         unbond_at: env.block.time,
-    }];
-    CLAIMS.save(deps.storage, &info.sender, &claim)?;
+    };
+
+    Claims::new(CLAIMS_KEY).save(
+        deps.storage,
+        info.sender.clone(),
+        release_at.seconds(),
+        &claim,
+    )?;
 
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
@@ -497,34 +503,20 @@ pub fn execute_claim(
     env: Env,
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
     let config = CONFIG.load(deps.storage)?;
-    if claim.is_empty() {
-        return Err(ContractError::NoClaim {});
-    }
-    //filter claim vector and make another vector which contains only mature claims
-    let mature_claims: Vec<Claim> = claim
-        .clone()
-        .into_iter()
-        .filter(|claim| claim.release_at <= env.block.time)
-        .collect();
-    //if no mature claims return error
+    let claims = Claims::new(CLAIMS_KEY);
+    // load mature claims where release_at < now using second key.
+    let mature_claims: Vec<Claim> =
+        claims.load_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
+    // if no mature claims return error
     if mature_claims.is_empty() {
         return Err(ContractError::WaitUnbonding {});
     }
-    //sum mature claims
-    let mut total_claim: Uint128 = Uint128::zero();
-    for claim in mature_claims.iter() {
-        total_claim = total_claim.checked_add(claim.amount)?;
-    }
-    //remove mature claims from claim vector
-    let new_claims: Vec<Claim> = claim
-        .into_iter()
-        .filter(|claim| claim.release_at > env.block.time)
-        .collect();
+    // sum mature claims
+    let total_claim: Uint128 = mature_claims.into_iter().map(|c| c.amount).sum();
 
-    //save new claim vector
-    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+    // remove mature claims from storage
+    claims.remove_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds());
 
     let stake_asset = Asset::cw20(config.stake_token_address, total_claim);
     let asset_message = stake_asset.transfer_msg(info.sender)?;
@@ -544,9 +536,14 @@ pub fn execute_force_claim(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
+    let claims =
+        Claims::new(CLAIMS_KEY).load(deps.storage, info.sender.clone(), release_at.seconds())?;
+
     if claim.is_empty() {
         return Err(ContractError::NoClaim {});
     }
+
+    // TODO: continue here
 
     //find desired claim if not found return error
     let desired_claim: Claim = claim
