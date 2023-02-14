@@ -29,14 +29,19 @@ pub fn instantiate(
     env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
+    // validate admin address
     let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
     // validate fee_collector address
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
-
+    // validate stake_token_address
     let stake_token_address = deps.api.addr_validate(&msg.stake_token_address)?;
-
+    // validate reward_token_address
     let reward_token_address = deps.api.addr_validate(&msg.reward_token_address)?;
+    // validate max_bond_duration
+    if msg.max_bond_duration < 1 {
+        return Err(ContractError::InvalidMaxBondDuration {});
+    }
 
     let config = Config {
         admin: admin.clone(),
@@ -44,6 +49,7 @@ pub fn instantiate(
         reward_token_address,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
+        max_bond_duration: msg.max_bond_duration,
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -109,7 +115,6 @@ pub fn execute_receive(
     wrapper: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
-    let _config = CONFIG.load(deps.storage)?;
     let api = deps.api;
     let balance = CW20Balance {
         denom: info.sender,
@@ -130,7 +135,7 @@ pub fn fund_reward(
     reward_end_time: Timestamp,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
-
+    // check reward_end_time
     if reward_end_time <= env.block.time {
         return Err(ContractError::InvalidRewardEndTime {});
     }
@@ -149,7 +154,6 @@ pub fn fund_reward(
     let mut state = STATE.load(deps.storage)?;
 
     // update reward index so that we distrubute latest reward.
-
     update_reward_index(&mut state, env.block.time)?;
     let unclaimed_reward = state
         .total_reward_supply
@@ -163,7 +167,6 @@ pub fn fund_reward(
     // every time we fund reward we reset start time.
     state.start_time = env.block.time;
     STATE.save(deps.storage, &state)?;
-    //TODO add responses
     let res = Response::new()
         .add_attribute("action", "fund_reward")
         .add_attribute("amount", amount.to_string())
@@ -183,6 +186,10 @@ pub fn execute_bond(
     if balance.denom != cfg.stake_token_address {
         return Err(ContractError::InvalidCw20TokenAddress {});
     }
+    // check duration
+    if duration < 1 || duration > cfg.max_bond_duration {
+        return Err(ContractError::InvalidBondDuration {});
+    }
 
     let amount = balance.amount;
 
@@ -196,8 +203,12 @@ pub fn execute_bond(
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time)?;
             update_staker_rewards(&mut state, env.block.time, &mut staker)?;
-            // when adding to existing staker best way to do is calculate the new weight and add it to total weight after removing old weight.
+            // add to existing staker
             staker.staked_amount = staker.staked_amount.add(amount);
+            // update total weight. Its a bit tricky to update total weight so i remove the old weight and add new weight.
+            let new_weight = Decimal256::from_ratio(duration, Uint128::one())
+                .sqrt()
+                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
             state.total_weight = state
                 .total_weight
                 .checked_sub(staker.position_weight)?
@@ -279,21 +290,18 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
         .seconds()
         .checked_sub(state.start_time.seconds())
         .unwrap_or(1u64);
-
+    // new distribution balance = total reward supply * time elapsed since last update / time elapsed since start
     let new_dist_balance = state
         .total_reward_supply
         .multiply_ratio(numerator, denominator);
 
     let divider = state.total_weight;
-
+    // adding index = new distribution balance / total weight
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
 
-    state.total_reward_claimed = state
-        .total_reward_claimed
-        .checked_add(new_dist_balance)
-        .unwrap_or(Uint128::zero());
+    state.total_reward_claimed = state.total_reward_claimed.checked_add(new_dist_balance)?;
 
     state.global_index = state.global_index.add(adding_index);
     state.last_updated = now;
@@ -313,6 +321,7 @@ pub fn execute_update_staker_rewards(
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
     }
+    // stakers rewards are updated for every duration and current rewards summed to return response
     let rewards: Uint128 = STAKERS
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
@@ -349,10 +358,11 @@ pub fn update_staker_rewards(
     update_reward_index(state, now)?;
 
     let index_diff = state.global_index - stake_position.index;
-
+    // new distributed reward = index diff * position weight + dec rewards
     let new_distributed_reward = index_diff
         .checked_mul(stake_position.position_weight)?
         .checked_add(stake_position.dec_rewards)?;
+    // decimals are used to store the remainder of the division
     let decimals = get_decimals(new_distributed_reward)?;
 
     let rewards_uint128 = (new_distributed_reward * Uint256::one())
@@ -362,7 +372,9 @@ pub fn update_staker_rewards(
     stake_position.pending_rewards = stake_position
         .pending_rewards
         .checked_add(rewards_uint128)?;
+    // update stakers index
     stake_position.index = state.global_index;
+    // update last claimed time. This is used to return data for the reward calculation
     stake_position.last_claimed = now;
     Ok(stake_position.pending_rewards)
 }
@@ -382,6 +394,7 @@ pub fn execute_receive_reward(
         .into_iter()
         .map(|(_, mut staker)| {
             let reward = update_staker_rewards(&mut state, env.block.time, &mut staker).unwrap();
+            // set pending rewards to zero.
             staker.pending_rewards = Uint128::zero();
             STAKERS
                 .save(
@@ -415,9 +428,8 @@ pub fn execute_unbond(
     let config = CONFIG.load(deps.storage)?;
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
-
+    // rewards for desired duration is updated and pending rewards are set to zero
     let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)?;
-
     staker.pending_rewards = Uint128::zero();
 
     let unbond_amount = match amount {

@@ -10,6 +10,7 @@ pub struct InstantiateMsg {
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
+    pub max_bond_duration: u128,
 }
 
 #[cw_serde]

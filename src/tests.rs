@@ -28,6 +28,7 @@ mod tests {
             admin: None,
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
+            max_bond_duration: 100,
         }
     }
 
@@ -63,6 +64,7 @@ mod tests {
             admin: Some("admin".to_string()),
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
+            max_bond_duration: 100,
         };
         let env = mock_env();
         let info = MessageInfo {

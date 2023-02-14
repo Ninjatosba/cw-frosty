@@ -1,1 +1,0 @@
-9cd1839b5298f3eb4c9c1a75cde4680ff6c533a17d0ab12d65de6dd8138fa739  ./target/wasm32-unknown-unknown/release/cw_share.wasm

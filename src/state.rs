@@ -144,6 +144,7 @@ pub struct Config {
     pub reward_token_address: Addr,
     pub force_claim_ratio: Decimal,
     pub fee_collector: Addr,
+    pub max_bond_duration: u128,
 }
 
 pub struct CW20Balance {

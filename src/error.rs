@@ -21,6 +21,12 @@ pub enum ContractError {
     #[error("Reward end time cannot be in the past")]
     InvalidRewardEndTime {},
 
+    #[error("Max bond duration cant be lower than 1 day")]
+    InvalidMaxBondDuration {},
+
+    #[error("Invalid bond duration as days")]
+    InvalidBondDuration {},
+
     #[error("Unauthorized")]
     Unauthorized {},
 
