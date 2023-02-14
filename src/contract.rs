@@ -114,15 +114,10 @@ pub fn execute_receive(
     let balance = CW20Balance {
         denom: info.sender,
         amount: wrapper.amount,
+        sender: api.addr_validate(&wrapper.sender)?,
     };
     match msg {
-        ReceiveMsg::Bond { duration_day } => execute_bond(
-            deps,
-            env,
-            balance,
-            api.addr_validate(&wrapper.sender)?,
-            duration_day,
-        ),
+        ReceiveMsg::Bond { duration_day } => execute_bond(deps, env, balance, duration_day),
         ReceiveMsg::RewardUpdate { reward_end_time } => {
             fund_reward(deps, env, balance, reward_end_time)
         }
@@ -142,6 +137,11 @@ pub fn fund_reward(
 
     // check denom
     if balance.denom != cfg.reward_token_address {
+        return Err(ContractError::InvalidCw20TokenAddress {});
+    }
+
+    // check sender
+    if balance.sender != cfg.admin {
         return Err(ContractError::InvalidCw20TokenAddress {});
     }
     let amount = balance.amount;
@@ -176,7 +176,6 @@ pub fn execute_bond(
     deps: DepsMut,
     env: Env,
     balance: CW20Balance,
-    sender: Addr,
     duration: u128,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
@@ -192,7 +191,7 @@ pub fn execute_bond(
     }
     let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
-    let staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
+    let staker = STAKERS.may_load(deps.storage, (&balance.sender, duration))?;
     match staker {
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time)?;
@@ -214,7 +213,7 @@ pub fn execute_bond(
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
 
-            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
+            STAKERS.save(deps.storage, (&balance.sender, duration), &staker)?;
         }
         None => {
             // create new staker
@@ -235,7 +234,7 @@ pub fn execute_bond(
             };
             state.total_weight = state.total_weight.add(position_weight);
 
-            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
+            STAKERS.save(deps.storage, (&balance.sender, duration), &staker)?;
         }
     }
     state.total_staked = state.total_staked.add(amount);
@@ -243,7 +242,7 @@ pub fn execute_bond(
 
     let res = Response::new()
         .add_attribute("action", "bond")
-        .add_attribute("sender", sender)
+        .add_attribute("sender", balance.sender)
         .add_attribute("amount", amount)
         .add_attribute("duration_day", duration.to_string());
 
