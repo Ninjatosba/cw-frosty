@@ -16,10 +16,11 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Config, StakePosition, State, CLAIMS, CONFIG, STAKERS, STATE,
+    CW20Balance, Claim, Claims, Config, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
+use cw_storage_plus::Bound;
 use std::convert::TryInto;
 use std::ops::Add;
 
@@ -80,7 +81,6 @@ pub fn instantiate(
 }
 
 #[cfg(not(feature = "library"))]
-
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -103,7 +103,7 @@ pub fn execute(
             fee_collector,
             force_claim_ratio,
         } => execute_update_config(deps, env, info, force_claim_ratio, fee_collector, admin),
-        ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
+        ExecuteMsg::ForceClaim { release_at } => execute_force_claim(deps, env, info, release_at),
     }
 }
 
@@ -119,15 +119,10 @@ pub fn execute_receive(
     let balance = CW20Balance {
         denom: info.sender,
         amount: wrapper.amount,
+        sender: api.addr_validate(&wrapper.sender)?,
     };
     match msg {
-        ReceiveMsg::Bond { duration_day } => execute_bond(
-            deps,
-            env,
-            balance,
-            api.addr_validate(&wrapper.sender)?,
-            duration_day,
-        ),
+        ReceiveMsg::Bond { duration_day } => execute_bond(deps, env, balance, duration_day),
         ReceiveMsg::RewardUpdate { reward_end_time } => {
             fund_reward(deps, env, balance, reward_end_time)
         }
@@ -147,6 +142,11 @@ pub fn fund_reward(
 
     // check denom
     if balance.denom != cfg.reward_token_address {
+        return Err(ContractError::InvalidCw20TokenAddress {});
+    }
+
+    // check sender
+    if balance.sender != cfg.admin {
         return Err(ContractError::InvalidCw20TokenAddress {});
     }
     let amount = balance.amount;
@@ -179,7 +179,6 @@ pub fn execute_bond(
     deps: DepsMut,
     env: Env,
     balance: CW20Balance,
-    sender: Addr,
     duration: u128,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
@@ -199,7 +198,7 @@ pub fn execute_bond(
     }
     let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
-    let staker = STAKERS.may_load(deps.storage, (&sender, duration))?;
+    let staker = STAKERS.may_load(deps.storage, (&balance.sender, duration))?;
     match staker {
         Some(mut staker) => {
             update_reward_index(&mut state, env.block.time)?;
@@ -213,9 +212,19 @@ pub fn execute_bond(
             state.total_weight = state
                 .total_weight
                 .checked_sub(staker.position_weight)?
-                .add(new_weight);
-            staker.position_weight = new_weight;
-            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
+                .checked_add(
+                    Decimal256::from_ratio(duration, Uint128::one())
+                        .sqrt()
+                        .checked_mul(Decimal256::from_ratio(
+                            staker.staked_amount,
+                            Uint128::one(),
+                        ))?,
+                )?;
+            staker.position_weight = Decimal256::from_ratio(duration, Uint128::one())
+                .sqrt()
+                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
+
+            STAKERS.save(deps.storage, (&balance.sender, duration), &staker)?;
         }
         None => {
             // create new staker
@@ -236,7 +245,7 @@ pub fn execute_bond(
             };
             state.total_weight = state.total_weight.add(position_weight);
 
-            STAKERS.save(deps.storage, (&sender, duration), &staker)?;
+            STAKERS.save(deps.storage, (&balance.sender, duration), &staker)?;
         }
     }
     state.total_staked = state.total_staked.add(amount);
@@ -244,7 +253,7 @@ pub fn execute_bond(
 
     let res = Response::new()
         .add_attribute("action", "bond")
-        .add_attribute("sender", sender)
+        .add_attribute("sender", balance.sender)
         .add_attribute("amount", amount)
         .add_attribute("duration_day", duration.to_string());
 
@@ -345,7 +354,7 @@ pub fn update_staker_rewards(
     now: Timestamp,
     stake_position: &mut StakePosition,
 ) -> Result<Uint128, ContractError> {
-    // update reward index
+    //update reward index
     update_reward_index(state, now)?;
 
     let index_diff = state.global_index - stake_position.index;
@@ -379,10 +388,10 @@ pub fn execute_receive_reward(
     let config = CONFIG.load(deps.storage)?;
 
     let rewards: Uint128 = STAKERS
+        .prefix(&info.sender)
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
-        .filter(|(staker, _)| staker.0 == info.sender)
         .map(|(_, mut staker)| {
             let reward = update_staker_rewards(&mut state, env.block.time, &mut staker).unwrap();
             // set pending rewards to zero.
@@ -448,13 +457,19 @@ pub fn execute_unbond(
     STATE.save(deps.storage, &state)?;
     let duration_as_sec = days_to_seconds(duration);
 
-    let claim = vec![Claim {
+    let release_at = env.block.time.plus_seconds(duration_as_sec);
+    let claim = Claim {
         amount: unbond_amount,
-        release_at: env.block.time.plus_seconds(duration_as_sec),
+        release_at,
         unbond_at: env.block.time,
-    }];
-    CLAIMS.save(deps.storage, &info.sender, &claim)?;
+    };
 
+    Claims::new(CLAIMS_KEY).save(
+        deps.storage,
+        info.sender.clone(),
+        release_at.seconds(),
+        &claim,
+    )?;
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
@@ -498,34 +513,20 @@ pub fn execute_claim(
     env: Env,
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
     let config = CONFIG.load(deps.storage)?;
-    if claim.is_empty() {
-        return Err(ContractError::NoClaim {});
-    }
-    //filter claim vector and make another vector which contains only mature claims
-    let mature_claims: Vec<Claim> = claim
-        .clone()
-        .into_iter()
-        .filter(|claim| claim.release_at <= env.block.time)
-        .collect();
-    //if no mature claims return error
+    let claims = Claims::new(CLAIMS_KEY);
+    // load mature claims where release_at < now using second key.
+    let mature_claims: Vec<Claim> =
+        claims.load_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
+    // if no mature claims return error
     if mature_claims.is_empty() {
-        return Err(ContractError::WaitUnbonding {});
+        return Err(ContractError::NoMatureClaim {});
     }
-    //sum mature claims
-    let mut total_claim: Uint128 = Uint128::zero();
-    for claim in mature_claims.iter() {
-        total_claim = total_claim.checked_add(claim.amount)?;
-    }
-    //remove mature claims from claim vector
-    let new_claims: Vec<Claim> = claim
-        .into_iter()
-        .filter(|claim| claim.release_at > env.block.time)
-        .collect();
+    // sum mature claims
+    let total_claim: Uint128 = mature_claims.into_iter().map(|c| c.amount).sum();
 
-    //save new claim vector
-    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+    // remove mature claims from storage
+    claims.remove_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
 
     let stake_asset = Asset::cw20(config.stake_token_address, total_claim);
     let asset_message = stake_asset.transfer_msg(info.sender)?;
@@ -544,58 +545,53 @@ pub fn execute_force_claim(
     release_at: Timestamp,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
-    if claim.is_empty() {
-        return Err(ContractError::NoClaim {});
+    let mut claims =
+        Claims::new(CLAIMS_KEY).load(deps.storage, info.sender.clone(), release_at.seconds())?;
+
+    if claims.is_empty() {
+        return Err(ContractError::NoClaimForTimestamp {});
     }
 
-    //find desired claim if not found return error
-    let desired_claim: Claim = claim
-        .clone()
-        .into_iter()
-        .find(|claim| claim.release_at == release_at)
-        .ok_or(ContractError::NoClaimForTimestamp {})?;
+    if release_at.seconds() < env.block.time.seconds() {
+        return Err(ContractError::InvalidReleaseTime {});
+    }
 
-    //remove desired claim from claim vector
-    let new_claims: Vec<Claim> = claim
-        .into_iter()
-        .filter(|claim| claim.release_at != release_at)
-        .collect();
-    //save new claim vector
-    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+    let remaining_time = release_at.minus_seconds(env.block.time.seconds()).seconds();
+    let mut total_fee: Uint128 = Uint128::zero();
+    let mut total_claim_amount: Uint128 = Uint128::zero();
+    for c in claims.iter_mut() {
+        let total_unbond_duration = c.release_at.minus_seconds(c.unbond_at.seconds()).seconds();
+        let cut_ratio = config
+            .force_claim_ratio
+            .checked_mul(Decimal::from_ratio(remaining_time, total_unbond_duration))?;
+        let cut_amount = c
+            .amount
+            .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
 
-    let remaning_time = desired_claim
-        .release_at
-        .minus_seconds(env.block.time.seconds())
-        .seconds();
+        let claim_amount = c.amount.checked_sub(cut_amount)?;
+        total_fee = total_fee.checked_add(cut_amount)?;
+        total_claim_amount = total_claim_amount.checked_add(claim_amount)?;
+    }
 
-    let total_unbond_duration = desired_claim
-        .release_at
-        .minus_seconds(desired_claim.unbond_at.seconds())
-        .seconds();
-    //cut_ratio = force_claim_ratio * (remaning_time / total_unbond_duration)
-    let cut_ratio = config
-        .force_claim_ratio
-        .checked_mul(Decimal::from_ratio(remaning_time, total_unbond_duration))?;
-    //cut_amount = desired_claim.amount * cut_ratio
-    let cut_amount = desired_claim
-        .amount
-        .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
-    //claim_amount = desired_claim.amount - cut_amount
-    let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
     //send cut_amount to fee_collector
-    let cut_asset = Asset::cw20(config.stake_token_address.clone(), cut_amount);
-    let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
+    let fee_asset = Asset::cw20(config.stake_token_address.clone(), total_fee);
+    let fee_message = fee_asset.transfer_msg(config.fee_collector)?;
     //send claim_amount to user
-    let claim_asset = Asset::cw20(config.stake_token_address, claim_amount);
-    let claim_message = claim_asset.transfer_msg(info.sender)?;
+    let claim_asset = Asset::cw20(config.stake_token_address, total_claim_amount);
+    let claim_message = claim_asset.transfer_msg(info.sender.clone())?;
 
+    //remove claim from storage
+    Claims::new(CLAIMS_KEY).remove_for_release_at(
+        deps.storage,
+        info.sender.clone(),
+        release_at.seconds(),
+    )?;
     let res = Response::new()
-        .add_message(cut_message)
+        .add_message(fee_message)
         .add_message(claim_message)
         .add_attribute("action", "force_claim")
-        .add_attribute("amount", claim_amount.to_string())
-        .add_attribute("cut_amount", cut_amount.to_string());
+        .add_attribute("amount", total_claim_amount.to_string())
+        .add_attribute("cut_amount", total_fee.to_string());
     Ok(res)
 }
 #[cfg(not(feature = "library"))]
@@ -643,7 +639,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
 
 pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
     let addr = deps.api.addr_validate(&address)?;
-    let claim = CLAIMS.load(deps.storage, &addr)?;
+    let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
     let claims: Vec<ClaimResponse> = claim
         .into_iter()
         .map(|claim| ClaimResponse {

@@ -45,6 +45,12 @@ pub enum ContractError {
     #[error("No claim for user")]
     NoClaim {},
 
+    #[error("No mature claim found for user")]
+    NoMatureClaim {},
+
+    #[error("Release time can not be in the past")]
+    InvalidReleaseTime {},
+
     #[error("No claim for sent timestamp")]
     NoClaimForTimestamp {},
 
