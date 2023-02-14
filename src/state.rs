@@ -37,6 +37,7 @@ pub struct Config {
 pub struct CW20Balance {
     pub denom: Addr,
     pub amount: Uint128,
+    pub sender: Addr,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");
