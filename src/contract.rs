@@ -97,7 +97,7 @@ pub fn execute(
             fee_collector,
             force_claim_ratio,
         } => execute_update_config(deps, env, info, force_claim_ratio, fee_collector, admin),
-        ExecuteMsg::ForceClaim { unbond_time } => execute_force_claim(deps, env, info, unbond_time),
+        ExecuteMsg::ForceClaim { release_at } => execute_force_claim(deps, env, info, release_at),
     }
 }
 
@@ -459,7 +459,6 @@ pub fn execute_unbond(
         release_at.seconds(),
         &claim,
     )?;
-
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
@@ -510,13 +509,13 @@ pub fn execute_claim(
         claims.load_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
     // if no mature claims return error
     if mature_claims.is_empty() {
-        return Err(ContractError::WaitUnbonding {});
+        return Err(ContractError::NoMatureClaim {});
     }
     // sum mature claims
     let total_claim: Uint128 = mature_claims.into_iter().map(|c| c.amount).sum();
 
     // remove mature claims from storage
-    claims.remove_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds());
+    claims.remove_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
 
     let stake_asset = Asset::cw20(config.stake_token_address, total_claim);
     let asset_message = stake_asset.transfer_msg(info.sender)?;
@@ -535,63 +534,53 @@ pub fn execute_force_claim(
     release_at: Timestamp,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let claim = CLAIMS.load(deps.storage, &info.sender).unwrap_or_default();
-    let claims =
+    let mut claims =
         Claims::new(CLAIMS_KEY).load(deps.storage, info.sender.clone(), release_at.seconds())?;
 
-    if claim.is_empty() {
-        return Err(ContractError::NoClaim {});
+    if claims.is_empty() {
+        return Err(ContractError::NoClaimForTimestamp {});
     }
 
-    // TODO: continue here
+    if release_at.seconds() < env.block.time.seconds() {
+        return Err(ContractError::InvalidReleaseTime {});
+    }
 
-    //find desired claim if not found return error
-    let desired_claim: Claim = claim
-        .clone()
-        .into_iter()
-        .find(|claim| claim.release_at == release_at)
-        .ok_or(ContractError::NoClaimForTimestamp {})?;
+    let remaining_time = release_at.minus_seconds(env.block.time.seconds()).seconds();
+    let mut total_fee: Uint128 = Uint128::zero();
+    let mut total_claim_amount: Uint128 = Uint128::zero();
+    for c in claims.iter_mut() {
+        let total_unbond_duration = c.release_at.minus_seconds(c.unbond_at.seconds()).seconds();
+        let cut_ratio = config
+            .force_claim_ratio
+            .checked_mul(Decimal::from_ratio(remaining_time, total_unbond_duration))?;
+        let cut_amount = c
+            .amount
+            .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
 
-    //remove desired claim from claim vector
-    let new_claims: Vec<Claim> = claim
-        .into_iter()
-        .filter(|claim| claim.release_at != release_at)
-        .collect();
-    //save new claim vector
-    CLAIMS.save(deps.storage, &info.sender, &new_claims)?;
+        let claim_amount = c.amount.checked_sub(cut_amount)?;
+        total_fee = total_fee.checked_add(cut_amount)?;
+        total_claim_amount = total_claim_amount.checked_add(claim_amount)?;
+    }
 
-    let remaning_time = desired_claim
-        .release_at
-        .minus_seconds(env.block.time.seconds())
-        .seconds();
-
-    let total_unbond_duration = desired_claim
-        .release_at
-        .minus_seconds(desired_claim.unbond_at.seconds())
-        .seconds();
-    //cut_ratio = force_claim_ratio * (remaning_time / total_unbond_duration)
-    let cut_ratio = config
-        .force_claim_ratio
-        .checked_mul(Decimal::from_ratio(remaning_time, total_unbond_duration))?;
-    //cut_amount = desired_claim.amount * cut_ratio
-    let cut_amount = desired_claim
-        .amount
-        .multiply_ratio(cut_ratio.numerator(), cut_ratio.denominator());
-    //claim_amount = desired_claim.amount - cut_amount
-    let claim_amount = desired_claim.amount.checked_sub(cut_amount)?;
     //send cut_amount to fee_collector
-    let cut_asset = Asset::cw20(config.stake_token_address.clone(), cut_amount);
-    let cut_message = cut_asset.transfer_msg(config.fee_collector)?;
+    let fee_asset = Asset::cw20(config.stake_token_address.clone(), total_fee);
+    let fee_message = fee_asset.transfer_msg(config.fee_collector)?;
     //send claim_amount to user
-    let claim_asset = Asset::cw20(config.stake_token_address, claim_amount);
-    let claim_message = claim_asset.transfer_msg(info.sender)?;
+    let claim_asset = Asset::cw20(config.stake_token_address, total_claim_amount);
+    let claim_message = claim_asset.transfer_msg(info.sender.clone())?;
 
+    //remove claim from storage
+    Claims::new(CLAIMS_KEY).remove_for_release_at(
+        deps.storage,
+        info.sender.clone(),
+        release_at.seconds(),
+    )?;
     let res = Response::new()
-        .add_message(cut_message)
+        .add_message(fee_message)
         .add_message(claim_message)
         .add_attribute("action", "force_claim")
-        .add_attribute("amount", claim_amount.to_string())
-        .add_attribute("cut_amount", cut_amount.to_string());
+        .add_attribute("amount", total_claim_amount.to_string())
+        .add_attribute("cut_amount", total_fee.to_string());
     Ok(res)
 }
 #[cfg(not(feature = "library"))]
@@ -639,7 +628,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
 
 pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
     let addr = deps.api.addr_validate(&address)?;
-    let claim = CLAIMS.load(deps.storage, &addr)?;
+    let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
     let claims: Vec<ClaimResponse> = claim
         .into_iter()
         .map(|claim| ClaimResponse {

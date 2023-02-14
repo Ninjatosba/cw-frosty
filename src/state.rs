@@ -5,6 +5,8 @@ use cosmwasm_std::{
 use cosmwasm_schema::cw_serde;
 use cw_storage_plus::{Bound, Item, Map, PrefixBound};
 
+use crate::ContractError;
+
 #[cw_serde]
 pub struct State {
     pub global_index: Decimal256,
@@ -68,25 +70,38 @@ impl<'a> Claims<'a> {
             .collect()
     }
 
+    pub fn load_all(&self, store: &dyn Storage, address: Addr) -> StdResult<Vec<Claim>> {
+        self.0
+            .sub_prefix(address)
+            .range(store, None, None, Order::Ascending)
+            .map(|x| x.map(|(_, v)| v))
+            .collect()
+    }
+
     pub fn load_mature_claims(
         &self,
         store: &dyn Storage,
         address: Addr,
-        release_at: u64,
+        now: u64,
     ) -> StdResult<Vec<Claim>> {
         self.0
             .sub_prefix(address)
             .range(
                 store,
-                Some(Bound::inclusive((release_at, 0))),
                 None,
+                Some(Bound::inclusive((now + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(_, v)| v))
             .collect::<StdResult<Vec<_>>>()
     }
 
-    pub fn remove_mature_claims(&self, store: &mut dyn Storage, address: Addr, release_at: u64) {
+    pub fn remove_mature_claims(
+        &self,
+        store: &mut dyn Storage,
+        address: Addr,
+        release_at: u64,
+    ) -> Result<(), ContractError> {
         self.0
             .sub_prefix(address.clone())
             .range(
@@ -98,7 +113,28 @@ impl<'a> Claims<'a> {
             .map(|x| x.map(|(k, v)| k))
             .collect::<StdResult<Vec<_>>>()?
             .into_iter()
-            .for_each(|k| self.0.remove(store, (address, k.0, k.1)));
+            .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));
+        Ok(())
+    }
+    pub fn remove_for_release_at(
+        &self,
+        store: &mut dyn Storage,
+        address: Addr,
+        release_at: u64,
+    ) -> Result<(), ContractError> {
+        self.0
+            .sub_prefix(address.clone())
+            .range(
+                store,
+                Some(Bound::inclusive((release_at, 0))),
+                Some(Bound::exclusive((release_at + 1, 0))),
+                Order::Ascending,
+            )
+            .map(|x| x.map(|(k, v)| k))
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));
+        Ok(())
     }
 }
 #[cw_serde]

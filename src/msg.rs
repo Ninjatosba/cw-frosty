@@ -22,7 +22,7 @@ pub enum ExecuteMsg {
     /// Update the reward index
     UpdateRewardIndex {},
     ForceClaim {
-        unbond_time: Timestamp,
+        release_at: Timestamp,
     },
     UpdateStakersReward {
         address: Option<String>,
