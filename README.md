@@ -40,7 +40,7 @@ Users can receive their rewards by sending a `ReceiveRewards` message to the con
 
 ### Unbonding
 
-Users can unbond their staked tokens at any time by sending an `UnbondStake` transaction. The user must select which position to unbond by including the `duration_as_days` in message
+Users can unbond their staked tokens at any time by sending an `UnbondStake` transaction. The user must select which position to unbond by including the `duration_as_days` in the message.
 
 Upon receiving the `UnbondStake` transaction. The rewards for the corresponding staking position will be updated and sent to the user. The contract will create a `claim` for bonded tokens to be claimed by user. This `claim` will not be claimable until the unbonding duration has elapsed. During the unbonding duration, the user will not receive any rewards.
 
