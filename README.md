@@ -24,7 +24,7 @@ $$ \text{position weight} = \sqrt{{\texttt{duration}}} \times {\text{amount}} $$
 
 Rewards will be calculated depending on the weight of the position. At each `update_index` call the contract calculates how much reward is to be distubuted as follows
 
-$$ {new Dist Balance = { {now-last Updated} \over {reward End Time-last Updated}}\*total Reward Supply} $$
+$$ {new Dist Balance = { {now-last Updated} \over {reward End Time-reward Start Time}}\*total Reward Supply} $$
 
 $$ {global index = {last Global Index + new Dist Balance \over total Weight}} $$
 
