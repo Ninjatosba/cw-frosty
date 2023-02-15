@@ -26,7 +26,7 @@ Rewards will be calculated depending on the weight of the position. At each `upd
 
 $$ {new Dist Balance = { {now-last Updated} \over {reward End Time-reward Start Time}}\*total Reward Supply} $$
 
-$$ {global index = {last Global Index + new Dist Balance \over total Weight}} $$
+$$ {global index = {last Global Index + {new Dist Balance \over total Weight}}} $$
 
 At `update_staker_rewards` call the contract will calculate rewards for every position of the user(e.g. A user staked for two positions as 10 days and 30 days). Calculation is made as follows
 
