@@ -26,7 +26,14 @@ let position_weight = Decimal256::from_ratio(duration, Uint128::one())
 
 
 ### Reward Distribution
-Rewards will be calculated depending on the weight of the user.
+Rewards will be calculated depending on the weight of the position. At each `update_index` call the contract calculates how much reward is to be distubuted as follows
+
+
+$$new_distrubution_balance = (now-last_updated/reward_end_time-last_updated)*total_reward_supply
+index+= new_distrubution_balance/total_weight$$
+
+
+
 
 ### Claiming Rewards
 Users can claim their rewards by sending a ClaimRewards message to the contract.
