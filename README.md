@@ -24,13 +24,13 @@ $$ \text{position weight} = \sqrt{{\texttt{duration}}} \times {\text{amount}} $$
 
 Rewards will be calculated depending on the weight of the position. At each `update_index` call the contract calculates how much reward is to be distubuted as follows
 
-$$ {new Dist Balance = {  {now-last Updated} \over {reward End Time-last Updated}}*total Reward Supply} $$
+$$ {new Dist Balance = { {now-last Updated} \over {reward End Time-last Updated}}\*total Reward Supply} $$
 
 $$ {global index = {last Global Index + new Dist Balance \over total Weight}} $$
 
 At `update_staker_rewards` call the contract will calculate rewards for every position of the user(e.g. A user staked for two positions as 10 days and 30 days). Calculation is made as follows
 
-$$ {new Rewards = {global Index-user Index} * position Weight } $$
+$$ {new Rewards = {global Index-user Index} \* position Weight } $$
 
 $$ {pending Rewards += new Rewards }$$
 
@@ -39,11 +39,13 @@ $$ {pending Rewards += new Rewards }$$
 Users can receive their rewards by sending a `ReceiveRewards` message to the contract.
 
 ### Unbonding
-Users can unbond their staked tokens at any time by sending an `UnbondStake` transaction. The user must select which position to unbond by including the  `duration_as_days` in message
+
+Users can unbond their staked tokens at any time by sending an `UnbondStake` transaction. The user must select which position to unbond by including the `duration_as_days` in message
 
 Upon receiving the `UnbondStake` transaction. The rewards for the corresponding staking position will be updated and sent to the user. The contract will create a `claim` for bonded tokens to be claimed by user. This `claim` will not be claimable until the unbonding duration has elapsed. During the unbonding duration, the user will not receive any rewards.
 
 ### Force Claim
+
 Users can claim their bonded_tokens before the unbonding duration elapsed by paying extra fee. The fee calculation is as follows
 
 $$ {fee = {{release At - now \over release At-unbond At}*force Claim Ratio}*amount} $$

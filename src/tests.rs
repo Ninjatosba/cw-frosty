@@ -384,7 +384,7 @@ mod tests {
 
         // update staker rewards with no bond
         let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
         assert_eq!(res, ContractError::NoBond {});
 
@@ -414,7 +414,7 @@ mod tests {
 
         // update staker rewards
         let info = mock_info("staker1", &[]);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(1000);
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -446,7 +446,7 @@ mod tests {
 
         // update staker rewards
         let info = mock_info("staker1", &[]);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(2000);
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -544,16 +544,16 @@ mod tests {
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(1000);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // update staker 2
         let info = mock_info("staker2", &[]);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         // update staker 3
         let info = mock_info("staker3", &[]);
-        let msg = ExecuteMsg::UpdateStakersReward { address: None };
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // query staker 1
@@ -683,7 +683,7 @@ mod tests {
         let env = mock_env();
         let msg = ExecuteMsg::UnbondStake {
             amount: None,
-            duration: 16,
+            duration_as_days: 16,
         };
         let res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert!(matches!(res, ContractError::Std(StdError::NotFound { .. })));
@@ -703,7 +703,7 @@ mod tests {
         let env = mock_env();
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(200)),
-            duration: 16,
+            duration_as_days: 16,
         };
         let res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(res, ContractError::InsufficientStakedAmount {});
@@ -713,7 +713,7 @@ mod tests {
         let env = mock_env();
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 36,
+            duration_as_days: 36,
         };
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert!(matches!(res, ContractError::Std(StdError::NotFound { .. })));
@@ -733,7 +733,7 @@ mod tests {
         env.block.time = env.block.time.plus_seconds(1000);
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 16,
+            duration_as_days: 16,
         };
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         // at unbond rewards are recieved
@@ -826,7 +826,7 @@ mod tests {
 
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 16,
+            duration_as_days: 16,
         };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
@@ -918,7 +918,7 @@ mod tests {
         env.block.time = env.block.time.plus_seconds(1000);
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 16,
+            duration_as_days: 16,
         };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
@@ -1059,7 +1059,7 @@ mod tests {
         env.block.time = env.block.time.plus_seconds(1000);
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 16,
+            duration_as_days: 16,
         };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
@@ -1070,7 +1070,7 @@ mod tests {
         env.block.time = env.block.time.plus_seconds(86400);
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
-            duration: 15,
+            duration_as_days: 15,
         };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
         // force claim for 2 claims for same address but diffirent duration although same release_time

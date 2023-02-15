@@ -8,8 +8,6 @@ use cw0::maybe_addr;
 use cw20::Cw20ReceiveMsg;
 use cw_asset::Asset;
 
-
-
 use crate::helper::{days_to_seconds, get_decimals};
 use crate::msg::{
     ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, ListClaimsResponse, MigrateMsg,
@@ -90,12 +88,13 @@ pub fn execute(
     match msg {
         ExecuteMsg::Receive(receive_message) => execute_receive(deps, env, info, receive_message),
         ExecuteMsg::UpdateRewardIndex {} => execute_update_reward_index(deps, env),
-        ExecuteMsg::UpdateStakersReward { address } => {
+        ExecuteMsg::UpdateStakerRewards { address } => {
             execute_update_staker_rewards(deps, env, info, address)
         }
-        ExecuteMsg::UnbondStake { amount, duration } => {
-            execute_unbond(deps, env, info, amount, duration)
-        }
+        ExecuteMsg::UnbondStake {
+            amount,
+            duration_as_days,
+        } => execute_unbond(deps, env, info, amount, duration_as_days),
         ExecuteMsg::ClaimUnbonded {} => execute_claim(deps, env, info),
         ExecuteMsg::ReceiveReward {} => execute_receive_reward(deps, env, info),
         ExecuteMsg::UpdateConfig {
@@ -422,12 +421,12 @@ pub fn execute_unbond(
     env: Env,
     info: MessageInfo,
     amount: Option<Uint128>,
-    duration: u128,
+    duration_as_days: u128,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
 
-    let mut staker = STAKERS.load(deps.storage, (&info.sender, duration))?;
+    let mut staker = STAKERS.load(deps.storage, (&info.sender, duration_as_days))?;
     // rewards for desired duration is updated and pending rewards are set to zero
     let reward = update_staker_rewards(&mut state, env.block.time, &mut staker)?;
     staker.pending_rewards = Uint128::zero();
@@ -439,23 +438,23 @@ pub fn execute_unbond(
             }
             staker.staked_amount = staker.staked_amount.checked_sub(amount)?;
             state.total_weight = state.total_weight.checked_sub(staker.position_weight)?;
-            let position_weight = Decimal256::from_ratio(duration, Uint128::one())
+            let position_weight = Decimal256::from_ratio(duration_as_days, Uint128::one())
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
             staker.position_weight = position_weight;
             state.total_weight = state.total_weight.checked_add(staker.position_weight)?;
-            STAKERS.save(deps.storage, (&info.sender, duration), &staker)?;
+            STAKERS.save(deps.storage, (&info.sender, duration_as_days), &staker)?;
             amount
         }
         None => {
             state.total_weight = state.total_weight.checked_sub(staker.position_weight)?;
-            STAKERS.remove(deps.storage, (&info.sender, duration));
+            STAKERS.remove(deps.storage, (&info.sender, duration_as_days));
             staker.staked_amount
         }
     };
     state.total_staked = state.total_staked.checked_sub(unbond_amount)?;
     STATE.save(deps.storage, &state)?;
-    let duration_as_sec = days_to_seconds(duration);
+    let duration_as_sec = days_to_seconds(duration_as_days);
 
     let release_at = env.block.time.plus_seconds(duration_as_sec);
     let claim = Claim {
@@ -478,7 +477,7 @@ pub fn execute_unbond(
         .add_attribute("action", "unbond")
         .add_attribute("address", info.sender)
         .add_attribute("amount", unbond_amount)
-        .add_attribute("duration", duration.to_string());
+        .add_attribute("duration", duration_as_days.to_string());
 
     Ok(res)
 }

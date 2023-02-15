@@ -25,12 +25,12 @@ pub enum ExecuteMsg {
     ForceClaim {
         release_at: Timestamp,
     },
-    UpdateStakersReward {
+    UpdateStakerRewards {
         address: Option<String>,
     },
     UnbondStake {
         amount: Option<Uint128>,
-        duration: u128,
+        duration_as_days: u128,
     },
 
     ClaimUnbonded {},
