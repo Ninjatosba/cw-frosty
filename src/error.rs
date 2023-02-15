@@ -57,6 +57,9 @@ pub enum ContractError {
     #[error("Withdraw amount is higher than the bonded amount")]
     InsufficientStakedAmount {},
 
+    #[error("Force claim ratio must be between 0 and 1")]
+    InvalidForceClaimRatio {},
+
     #[error("Asset error")]
     AssetError {},
 }

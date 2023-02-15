@@ -1,7 +1,7 @@
 use cosmwasm_std::from_slice;
 use cosmwasm_std::{
-    to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, entry_point, Env, Fraction, MessageInfo, Order,
-    Response, StdResult, Timestamp, Uint128, Uint256,
+    entry_point, to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo,
+    Order, Response, StdResult, Timestamp, Uint128, Uint256,
 };
 use cw0::maybe_addr;
 
@@ -40,6 +40,9 @@ pub fn instantiate(
     // validate max_bond_duration
     if msg.max_bond_duration < 1 {
         return Err(ContractError::InvalidMaxBondDuration {});
+    }
+    if (msg.force_claim_ratio < Decimal::zero()) || (msg.force_claim_ratio >= Decimal::one()) {
+        return Err(ContractError::InvalidForceClaimRatio {});
     }
 
     let config = Config {
