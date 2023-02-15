@@ -303,12 +303,12 @@ pub fn update_reward_index(state: &mut State, mut now: Timestamp) -> Result<(), 
     let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
         .checked_div(divider)
         .unwrap_or(Decimal256::zero());
+    if !state.total_weight.is_zero() {
+        state.total_reward_claimed = state.total_reward_claimed.checked_add(new_dist_balance)?;
 
-    state.total_reward_claimed = state.total_reward_claimed.checked_add(new_dist_balance)?;
-
-    state.global_index = state.global_index.add(adding_index);
-    state.last_updated = now;
-
+        state.global_index = state.global_index.add(adding_index);
+        state.last_updated = now;
+    }
     Ok(())
 }
 
