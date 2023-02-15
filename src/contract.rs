@@ -1,6 +1,6 @@
 use cosmwasm_std::from_slice;
 use cosmwasm_std::{
-    to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo, Order,
+    to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, entry_point, Env, Fraction, MessageInfo, Order,
     Response, StdResult, Timestamp, Uint128, Uint256,
 };
 use cw0::maybe_addr;
