@@ -840,7 +840,7 @@ mod tests {
         //list claims before claim
         let res = query(
             deps.as_ref(),
-            env.clone(),
+            env,
             QueryMsg::ListClaims {
                 address: "staker1".to_string(),
             },
@@ -870,7 +870,7 @@ mod tests {
         // list claim
         let res = query(
             deps.as_ref(),
-            env.clone(),
+            env,
             QueryMsg::ListClaims {
                 address: "staker1".to_string(),
             },
@@ -1046,7 +1046,7 @@ mod tests {
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
         // bond again
         let info = mock_info("stake_token_address", &[]);
-        let mut env = mock_env();
+        let env = mock_env();
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -1061,7 +1061,7 @@ mod tests {
             amount: Some(Uint128::new(100)),
             duration: 16,
         };
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond again
         let info = mock_info("staker1", &[]);
@@ -1072,7 +1072,7 @@ mod tests {
             amount: Some(Uint128::new(100)),
             duration: 15,
         };
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
         // force claim for 2 claims for same address but diffirent duration although same release_time
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
@@ -1080,7 +1080,7 @@ mod tests {
         let msg = ExecuteMsg::ForceClaim {
             release_at: env.block.time.plus_seconds(86400 * 16),
         };
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.messages[0].msg,
             CosmosMsg::Wasm(WasmMsg::Execute {

@@ -1,9 +1,7 @@
-use cosmwasm_std::{
-    Addr, Decimal, Decimal256, Order, StdResult, Storage, Timestamp, Uint128, Uint64,
-};
+use cosmwasm_std::{Addr, Decimal, Decimal256, Order, StdResult, Storage, Timestamp, Uint128};
 
 use cosmwasm_schema::cw_serde;
-use cw_storage_plus::{Bound, Item, Map, PrefixBound};
+use cw_storage_plus::{Bound, Item, Map};
 
 use crate::ContractError;
 
@@ -110,7 +108,7 @@ impl<'a> Claims<'a> {
                 None,
                 Order::Ascending,
             )
-            .map(|x| x.map(|(k, v)| k))
+            .map(|x| x.map(|(k, _v)| k))
             .collect::<StdResult<Vec<_>>>()?
             .into_iter()
             .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));
@@ -130,7 +128,7 @@ impl<'a> Claims<'a> {
                 Some(Bound::exclusive((release_at + 1, 0))),
                 Order::Ascending,
             )
-            .map(|x| x.map(|(k, v)| k))
+            .map(|x| x.map(|(k, _v)| k))
             .collect::<StdResult<Vec<_>>>()?
             .into_iter()
             .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));

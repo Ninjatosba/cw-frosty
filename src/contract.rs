@@ -1,6 +1,6 @@
 use cosmwasm_std::from_slice;
 use cosmwasm_std::{
-    to_binary, Addr, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo, Order,
+    to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo, Order,
     Response, StdResult, Timestamp, Uint128, Uint256,
 };
 use cw0::maybe_addr;
@@ -8,7 +8,7 @@ use cw0::maybe_addr;
 use cw20::Cw20ReceiveMsg;
 use cw_asset::Asset;
 
-use std::vec;
+
 
 use crate::helper::{days_to_seconds, get_decimals};
 use crate::msg::{
@@ -20,7 +20,7 @@ use crate::state::{
 };
 use crate::ContractError;
 use cosmwasm_std;
-use cw_storage_plus::Bound;
+
 use std::convert::TryInto;
 use std::ops::Add;
 
@@ -206,7 +206,7 @@ pub fn execute_bond(
             // add to existing staker
             staker.staked_amount = staker.staked_amount.add(amount);
             // update total weight. Its a bit tricky to update total weight so i remove the old weight and add new weight.
-            let new_weight = Decimal256::from_ratio(duration, Uint128::one())
+            let _new_weight = Decimal256::from_ratio(duration, Uint128::one())
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
             state.total_weight = state
@@ -583,7 +583,7 @@ pub fn execute_force_claim(
     //remove claim from storage
     Claims::new(CLAIMS_KEY).remove_for_release_at(
         deps.storage,
-        info.sender.clone(),
+        info.sender,
         release_at.seconds(),
     )?;
     let res = Response::new()
