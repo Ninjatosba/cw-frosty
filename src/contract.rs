@@ -409,7 +409,7 @@ pub fn execute_receive_reward(
             reward
         })
         .sum();
-
+    STATE.save(deps.storage, &state)?;
     let reward_asset = Asset::cw20(config.reward_token_address, rewards);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
     let res = Response::new()
