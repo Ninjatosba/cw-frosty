@@ -16,8 +16,8 @@ mod tests {
         query_state,
     };
     use crate::msg::{
-        ConfigResponse, ExecuteMsg, InstantiateMsg, ListClaimsResponse, QueryMsg, ReceiveMsg,
-        StakerForAllDurationResponse, StakerResponse, StateResponse,
+        ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, ListClaimsResponse, QueryMsg,
+        ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
     };
     use crate::ContractError;
 
@@ -303,6 +303,78 @@ mod tests {
             Decimal256::from_str("632.455532033675866598").unwrap()
         );
         assert_eq!(res.total_reward_supply, Uint128::new(199800000));
+
+        // test update reward after rewards end
+        //instantiation
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = MessageInfo {
+            sender: Addr::unchecked("creator"),
+            funds: vec![],
+        };
+        let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+
+        // fund reward
+        let info = mock_info("reward_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_nanos(1000778265785652786),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // bond staker1
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(47000900909);
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(2000778285);
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // update reward index
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(470009007909);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // update reward index
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(470009008909);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // update reward index
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(470009009909);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // update reward index
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_nanos(2000778285788952796);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        //check_state
+        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
+        println!("{:?}", res);
     }
 
     #[test]
@@ -876,7 +948,204 @@ mod tests {
             },
         );
         let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
-        assert_eq!(claims.claims.len(), 0);
+    }
+
+    #[test]
+    pub fn test_multiple_claims() {
+        // init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env, info, init_msg).unwrap();
+
+        // bond
+        let info = mock_info("stake_token_address", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        //fund rewards
+        let info = mock_info("reward_token_address", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ReceiveMsg::RewardUpdate {
+                reward_end_time: env.block.time.plus_seconds(100_000),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // bond again
+        let info = mock_info("stake_token_address", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 20 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // unbond for first bond
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(50)),
+            duration_as_days: 16,
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // unbond for second bond
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(100)),
+            duration_as_days: 20,
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // unbond remaining for first bond
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(2000);
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(50)),
+            duration_as_days: 16,
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // claim for first bond at day 18
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1382400 + 1001);
+
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::ListClaims {
+                address: "staker1".to_string(),
+            },
+        );
+        let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
+        // ListClaimsResponse {
+        //     claims: [
+        //         ClaimResponse {
+        //             amount: Uint128(
+        //                 50,
+        //             ),
+        //             release_at: Timestamp(
+        //                 Uint64(
+        //                     1573180819879305533,
+        //                 ),
+        //             ),
+        //             unbond_at: Timestamp(
+        //                 Uint64(
+        //                     1571798419879305533,
+        //                 ),
+        //             ),
+        //         },
+        //         ClaimResponse {
+        //             amount: Uint128(
+        //                 50,
+        //             ),
+        //             release_at: Timestamp(
+        //                 Uint64(
+        //                     1573181819879305533,
+        //                 ),
+        //             ),
+        //             unbond_at: Timestamp(
+        //                 Uint64(
+        //                     1571799419879305533,
+        //                 ),
+        //             ),
+        //         },
+        //         ClaimResponse {
+        //             amount: Uint128(
+        //                 100,
+        //             ),
+        //             release_at: Timestamp(
+        //                 Uint64(
+        //                     1573526419879305533,
+        //                 ),
+        //             ),
+        //             unbond_at: Timestamp(
+        //                 Uint64(
+        //                     1571798419879305533,
+        //                 ),
+        //             ),
+        //         },
+        //     ],
+        // }
+        assert_eq!(claims.claims.len(), 3);
+        assert_eq!(
+            claims.claims,
+            vec![
+                ClaimResponse {
+                    amount: Uint128::new(50),
+                    release_at: Timestamp::from_nanos(1573180819879305533),
+                    unbond_at: Timestamp::from_nanos(1571798419879305533),
+                },
+                ClaimResponse {
+                    amount: Uint128::new(50),
+                    release_at: Timestamp::from_nanos(1573181819879305533),
+                    unbond_at: Timestamp::from_nanos(1571799419879305533),
+                },
+                ClaimResponse {
+                    amount: Uint128::new(100),
+                    release_at: Timestamp::from_nanos(1573526419879305533),
+                    unbond_at: Timestamp::from_nanos(1571798419879305533),
+                },
+            ]
+        );
+
+        let msg = ExecuteMsg::ClaimUnbonded {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 1);
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "stake_token_address".to_string(),
+                funds: vec![],
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "staker1".to_string(),
+                    amount: Uint128::new(50),
+                })
+                .unwrap(),
+            })
+        );
+
+        // list claims now there should be 1 claim to be relased
+        let res = query(
+            deps.as_ref(),
+            env,
+            QueryMsg::ListClaims {
+                address: "staker1".to_string(),
+            },
+        );
+        let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(
+            claims.claims,
+            vec![
+                ClaimResponse {
+                    amount: Uint128::new(50),
+                    release_at: Timestamp::from_nanos(1573181819879305533),
+                    unbond_at: Timestamp::from_nanos(1571799419879305533),
+                },
+                ClaimResponse {
+                    amount: Uint128::new(100),
+                    release_at: Timestamp::from_nanos(1573526419879305533),
+                    unbond_at: Timestamp::from_nanos(1571798419879305533),
+                },
+            ]
+        );
     }
 
     #[test]

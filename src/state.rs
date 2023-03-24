@@ -87,7 +87,7 @@ impl<'a> Claims<'a> {
             .range(
                 store,
                 None,
-                Some(Bound::inclusive((now + 1, 0))),
+                Some(Bound::exclusive((now + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(_, v)| v))
@@ -98,14 +98,14 @@ impl<'a> Claims<'a> {
         &self,
         store: &mut dyn Storage,
         address: Addr,
-        release_at: u64,
+        now: u64,
     ) -> Result<(), ContractError> {
         self.0
             .sub_prefix(address.clone())
             .range(
                 store,
-                Some(Bound::inclusive((release_at, 0))),
                 None,
+                Some(Bound::exclusive((now + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(k, _v)| k))
