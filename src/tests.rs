@@ -1035,55 +1035,7 @@ mod tests {
             },
         );
         let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
-        // ListClaimsResponse {
-        //     claims: [
-        //         ClaimResponse {
-        //             amount: Uint128(
-        //                 50,
-        //             ),
-        //             release_at: Timestamp(
-        //                 Uint64(
-        //                     1573180819879305533,
-        //                 ),
-        //             ),
-        //             unbond_at: Timestamp(
-        //                 Uint64(
-        //                     1571798419879305533,
-        //                 ),
-        //             ),
-        //         },
-        //         ClaimResponse {
-        //             amount: Uint128(
-        //                 50,
-        //             ),
-        //             release_at: Timestamp(
-        //                 Uint64(
-        //                     1573181819879305533,
-        //                 ),
-        //             ),
-        //             unbond_at: Timestamp(
-        //                 Uint64(
-        //                     1571799419879305533,
-        //                 ),
-        //             ),
-        //         },
-        //         ClaimResponse {
-        //             amount: Uint128(
-        //                 100,
-        //             ),
-        //             release_at: Timestamp(
-        //                 Uint64(
-        //                     1573526419879305533,
-        //                 ),
-        //             ),
-        //             unbond_at: Timestamp(
-        //                 Uint64(
-        //                     1571798419879305533,
-        //                 ),
-        //             ),
-        //         },
-        //     ],
-        // }
+
         assert_eq!(claims.claims.len(), 3);
         assert_eq!(
             claims.claims,
