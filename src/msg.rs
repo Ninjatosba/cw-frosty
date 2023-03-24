@@ -73,8 +73,6 @@ pub struct StateResponse {
     pub start_time: Timestamp,
     pub last_updated: Timestamp,
 }
-// 1 user staked 1 token for 100 days/nanoseconds
-// 10*(total_reward_supply/end-time -start-time/total_weight)
 
 #[cw_serde]
 pub struct ConfigResponse {
