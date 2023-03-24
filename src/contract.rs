@@ -1,8 +1,8 @@
-use cosmwasm_std::from_slice;
 use cosmwasm_std::{
     entry_point, to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo,
     Order, Response, StdResult, Timestamp, Uint128, Uint256,
 };
+use cosmwasm_std::{from_slice, CosmosMsg};
 use cw0::maybe_addr;
 
 use cw20::Cw20ReceiveMsg;
@@ -473,11 +473,17 @@ pub fn execute_unbond(
         release_at.seconds(),
         &claim,
     )?;
+
+    let mut messages: Vec<CosmosMsg> = vec![];
     let reward_asset = Asset::cw20(config.reward_token_address, reward);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
+    if reward > Uint128::zero() {
+        messages.push(reward_msg);
+    }
+
     let res = Response::new()
-        .add_message(reward_msg)
+        .add_messages(messages)
         .add_attribute("action", "unbond")
         .add_attribute("address", info.sender)
         .add_attribute("amount", unbond_amount)
