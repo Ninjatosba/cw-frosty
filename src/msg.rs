@@ -11,6 +11,7 @@ pub struct InstantiateMsg {
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
     pub max_bond_duration: u128,
+    pub reward_per_second: Uint128,
 }
 
 #[cw_serde]
@@ -49,7 +50,6 @@ pub enum ExecuteMsg {
 
 pub enum ReceiveMsg {
     Bond { duration_day: u128 },
-    RewardUpdate { reward_end_time: Timestamp },
 }
 
 #[cw_serde]
@@ -67,10 +67,7 @@ pub struct StateResponse {
     pub global_index: Decimal256,
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
-    pub reward_end_time: Timestamp,
-    pub total_reward_supply: Uint128,
     pub total_reward_claimed: Uint128,
-    pub start_time: Timestamp,
     pub last_updated: Timestamp,
 }
 
@@ -81,6 +78,7 @@ pub struct ConfigResponse {
     pub admin: String,
     pub fee_collector: String,
     pub force_claim_ratio: String,
+    pub reward_per_second: Uint128,
 }
 
 #[cw_serde]
