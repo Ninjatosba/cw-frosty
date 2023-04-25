@@ -44,9 +44,6 @@ pub fn instantiate(
     if (msg.force_claim_ratio < Decimal::zero()) || (msg.force_claim_ratio >= Decimal::one()) {
         return Err(ContractError::InvalidForceClaimRatio {});
     }
-    if msg.reward_per_second <= Uint128::zero() {
-        return Err(ContractError::InvalidRewardPerSecond {});
-    }
 
     let config = Config {
         admin: admin.clone(),
@@ -55,7 +52,7 @@ pub fn instantiate(
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
         max_bond_duration: msg.max_bond_duration,
-        reward_per_second: msg.reward_per_second,
+        reward_per_second: Uint128::zero(),
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -108,6 +105,9 @@ pub fn execute(
             force_claim_ratio,
         } => execute_update_config(deps, env, info, force_claim_ratio, fee_collector, admin),
         ExecuteMsg::ForceClaim { release_at } => execute_force_claim(deps, env, info, release_at),
+        ExecuteMsg::SetRewardPerSecond { reward_per_second } => {
+            execute_set_reward_per_second(deps, env, info, reward_per_second)
+        }
     }
 }
 
@@ -224,7 +224,11 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
 
     let res = Response::new()
         .add_attribute("action", "update_reward_index")
-        .add_attribute("new_index", state.global_index.to_string());
+        .add_attribute("new_index", state.global_index.to_string())
+        .add_attribute(
+            "total_reward_claimed",
+            state.total_reward_claimed.to_string(),
+        );
     Ok(res)
 }
 
@@ -550,6 +554,30 @@ pub fn execute_force_claim(
         .add_attribute("amount", total_claim_amount.to_string())
         .add_attribute("cut_amount", total_fee.to_string());
     Ok(res)
+}
+
+pub fn execute_set_reward_per_second(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    reward_per_second: Uint128,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    let mut config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.admin {
+        return Err(ContractError::Unauthorized {});
+    };
+    if reward_per_second <= Uint128::zero() {
+        return Err(ContractError::InvalidRewardPerSecond {});
+    };
+    update_reward_index(&mut state, env.block.time, config.clone())?;
+    STATE.save(deps.storage, &state)?;
+    config.reward_per_second = reward_per_second;
+    CONFIG.save(deps.storage, &config)?;
+    Ok(Response::default()
+        .add_attribute("action", "set_reward_per_second".to_string())
+        .add_attribute("reward_per_second", reward_per_second.to_string()))
 }
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {

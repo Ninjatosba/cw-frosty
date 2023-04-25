@@ -11,18 +11,16 @@ pub struct InstantiateMsg {
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
     pub max_bond_duration: u128,
-    pub reward_per_second: Uint128,
 }
 
 #[cw_serde]
 
 pub enum ExecuteMsg {
-    ////////////////////
-    /// Owner's operations
-    ///////////////////
     Receive(Cw20ReceiveMsg),
-    /// Update the reward index
     UpdateRewardIndex {},
+    SetRewardPerSecond {
+        reward_per_second: Uint128,
+    },
     ForceClaim {
         release_at: Timestamp,
     },
