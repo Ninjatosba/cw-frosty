@@ -441,200 +441,186 @@ mod tests {
         assert_eq!(res.total_reward_claimed, Uint128::new(10000));
     }
 
-    //     #[test]
-    //     pub fn test_update_staker_rewards() {
-    //         // instantiate
-    //         let mut deps = mock_dependencies();
-    //         let init_msg = default_init();
-    //         let env = mock_env();
-    //         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
+    #[test]
+    pub fn test_update_staker_rewards() {
+        // instantiate
+        let mut deps = mock_dependencies();
+        let init_msg = default_init();
+        let env = mock_env();
+        instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-    //         // update staker rewards with no bond
-    //         let info = mock_info("creator", &[]);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-    //         assert_eq!(res, ContractError::NoBond {});
+        // update staker rewards with no bond
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(res, ContractError::NoBond {});
 
-    //         // bond
-    //         let env = mock_env();
-    //         let info = mock_info("stake_token_address", &[]);
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "staker1".to_string(),
-    //             amount: Uint128::new(100),
-    //             msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        // bond
+        let env = mock_env();
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-    //         // fund reward
-    //         let info = mock_info("reward_token_address", &[]);
-    //         let env = mock_env();
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "creator".to_string(),
-    //             amount: Uint128::new(100_000_000),
-    //             msg: to_binary(&ReceiveMsg::RewardUpdate {
-    //                 reward_end_time: env.block.time.plus_seconds(100_000),
-    //             })
-    //             .unwrap(),
-    //         });
+        // set reward per second
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::new(1000),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
 
-    //         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        // update staker rewards
+        let info = mock_info("staker1", &[]);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // query  staker
+        let res = query_staker_for_duration(env.clone(), deps.as_ref(), "staker1".to_string(), 10)
+            .unwrap();
+        // checking if the reward distrubuted is same as pending rewards of staker
+        let reward_to_staker1 = res.pending_rewards;
+        let rounded_reward =
+            Uint128::from_str(res.dec_rewards.to_uint_ceil().to_string().as_str()).unwrap();
 
-    //         // update staker rewards
-    //         let info = mock_info("staker1", &[]);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let mut env = mock_env();
-    //         env.block.time = env.block.time.plus_seconds(1000);
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-    //         // query  staker
-    //         let res = query_staker_for_duration(env.clone(), deps.as_ref(), "staker1".to_string(), 10)
-    //             .unwrap();
-    //         // checking if the reward distrubuted is same as pending rewards of staker
-    //         let reward_to_staker1 = res.pending_rewards;
-    //         let rounded_reward =
-    //             Uint128::from_str(res.dec_rewards.to_uint_ceil().to_string().as_str()).unwrap();
+        // query  state
+        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
+        let reward_distrubuted = res.total_reward_claimed;
+        assert_eq!(reward_to_staker1 + rounded_reward, reward_distrubuted);
 
-    //         // query  state
-    //         let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
-    //         let reward_distrubuted = res.total_reward_claimed;
-    //         assert_eq!(reward_to_staker1 + rounded_reward, reward_distrubuted);
+        // update one staker with multiple durations
+        // second bond
+        //first 1000000 is for first bond
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 20 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-    //         // update one staker with multiple durations
-    //         // second bond
-    //         //first 1000000 is for first bond
-    //         let mut env = mock_env();
-    //         env.block.time = env.block.time.plus_seconds(1000);
-    //         let info = mock_info("stake_token_address", &[]);
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "staker1".to_string(),
-    //             amount: Uint128::new(100),
-    //             msg: to_binary(&ReceiveMsg::Bond { duration_day: 20 }).unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        // update staker rewards
+        let info = mock_info("staker1", &[]);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(2000);
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _rewards = res.attributes[2].value.parse::<u128>().unwrap();
 
-    //         // update staker rewards
-    //         let info = mock_info("staker1", &[]);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let mut env = mock_env();
-    //         env.block.time = env.block.time.plus_seconds(2000);
-    //         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-    //         let _rewards = res.attributes[2].value.parse::<u128>().unwrap();
+        // query  staker for all durations
+        let _res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
 
-    //         // query  staker for all durations
-    //         let _res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
+            .unwrap();
 
-    //         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
-    //             .unwrap();
+        // query state
+        // checking if the reward distrubuted is same as pending rewards of staker
+        let reward_to_staker1 = res.positions[0].pending_rewards + res.positions[1].pending_rewards;
+        let rounded_reward = Uint128::from_str(
+            (res.positions[0].dec_rewards + res.positions[1].dec_rewards)
+                .to_uint_ceil()
+                .to_string()
+                .as_str(),
+        );
+        // query  state
+        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
 
-    //         // query state
-    //         // checking if the reward distrubuted is same as pending rewards of staker
-    //         let reward_to_staker1 = res.positions[0].pending_rewards + res.positions[1].pending_rewards;
-    //         let rounded_reward = Uint128::from_str(
-    //             (res.positions[0].dec_rewards + res.positions[1].dec_rewards)
-    //                 .to_uint_ceil()
-    //                 .to_string()
-    //                 .as_str(),
-    //         );
-    //         // query  state
-    //         let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
+        let reward_distrubuted = res.total_reward_claimed;
+        assert_eq!(
+            reward_to_staker1 + rounded_reward.unwrap(),
+            reward_distrubuted
+        );
+    }
 
-    //         let reward_distrubuted = res.total_reward_claimed;
-    //         assert_eq!(
-    //             reward_to_staker1 + rounded_reward.unwrap(),
-    //             reward_distrubuted
-    //         );
-    //     }
+    #[test]
+    pub fn test_scenario() {
+        //init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let env = mock_env();
+        instantiate(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("creator", &[]),
+            init_msg,
+        )
+        .unwrap();
 
-    //     #[test]
-    //     pub fn test_scenario() {
-    //         //init
-    //         let mut deps = mock_dependencies_with_balance(&[]);
-    //         let init_msg = default_init();
-    //         let env = mock_env();
-    //         instantiate(
-    //             deps.as_mut(),
-    //             env.clone(),
-    //             mock_info("creator", &[]),
-    //             init_msg,
-    //         )
-    //         .unwrap();
+        //first bond
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-    //         //first bond
-    //         let info = mock_info("stake_token_address", &[]);
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "staker1".to_string(),
-    //             amount: Uint128::new(100),
-    //             msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        //second bond
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker2".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 25 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-    //         //second bond
-    //         let info = mock_info("stake_token_address", &[]);
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "staker2".to_string(),
-    //             amount: Uint128::new(100),
-    //             msg: to_binary(&ReceiveMsg::Bond { duration_day: 25 }).unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        //third bond
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker3".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 36 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // set reward per second
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-    //         //third bond
-    //         let info = mock_info("stake_token_address", &[]);
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "staker3".to_string(),
-    //             amount: Uint128::new(100),
-    //             msg: to_binary(&ReceiveMsg::Bond { duration_day: 36 }).unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-    //         // fund rewards
-    //         // reward amount 100_000_000
-    //         // distrubuted in 100_000 seconds
-    //         let info = mock_info("reward_token_address", &[]);
-    //         let env = mock_env();
-    //         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //             sender: "creator".to_string(),
-    //             amount: Uint128::new(100_000_000),
-    //             msg: to_binary(&ReceiveMsg::RewardUpdate {
-    //                 reward_end_time: env.block.time.plus_seconds(100_000),
-    //             })
-    //             .unwrap(),
-    //         });
-    //         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        // update staker rewards at 1000 seconds all reweards should be 100_000_000/100=1_000_000
+        // staker1 amount 100 -- duration 16 -- weight 100*4=400
+        // staker2 amount 100 -- duration 25 -- weight 100*5=500
+        // staker3 amount 100 -- duration 36 -- weight 100*6=600
+        // total weight 1500
+        // staker1 reward 400/1500*1_000_000= 266_666
+        // staker2 reward 500/1500*1_000_000= 333_333
+        // staker3 reward 600/1500*1_000_000= 400_000
 
-    //         // update staker rewards at 1000 seconds all reweards should be 100_000_000/100=1_000_000
-    //         // staker1 amount 100 -- duration 16 -- weight 100*4=400
-    //         // staker2 amount 100 -- duration 25 -- weight 100*5=500
-    //         // staker3 amount 100 -- duration 36 -- weight 100*6=600
-    //         // total weight 1500
-    //         // staker1 reward 400/1500*1_000_000= 266_666
-    //         // staker2 reward 500/1500*1_000_000= 333_333
-    //         // staker3 reward 600/1500*1_000_000= 400_000
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-    //         let info = mock_info("staker1", &[]);
-    //         let mut env = mock_env();
-    //         env.block.time = env.block.time.plus_seconds(1000);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // update staker 2
+        let info = mock_info("staker2", &[]);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // update staker 3
+        let info = mock_info("staker3", &[]);
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-    //         // update staker 2
-    //         let info = mock_info("staker2", &[]);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-    //         // update staker 3
-    //         let info = mock_info("staker3", &[]);
-    //         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
-    //         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-    //         // query staker 1
-    //         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
-    //             .unwrap();
-    //         assert_eq!(res.positions[0].pending_rewards, Uint128::new(266_666));
-    //         // query staker 2
-    //         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker2".to_string())
-    //             .unwrap();
-    //         assert_eq!(res.positions[0].pending_rewards, Uint128::new(333_333));
-    //         // query staker 3
-    //         let res = query_staker_for_all_duration(deps.as_ref(), env, "staker3".to_string()).unwrap();
-    //         assert_eq!(res.positions[0].pending_rewards, Uint128::new(399_999));
-    //     }
+        // query staker 1
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
+            .unwrap();
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(266_666));
+        // query staker 2
+        let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker2".to_string())
+            .unwrap();
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(333_333));
+        // query staker 3
+        let res = query_staker_for_all_duration(deps.as_ref(), env, "staker3".to_string()).unwrap();
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(399_999));
+    }
 
     //     #[test]
     //     pub fn test_recieve_rewards() {
