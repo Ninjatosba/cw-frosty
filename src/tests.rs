@@ -421,14 +421,14 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::new(100),
         };
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // update reward index after reward per second is set
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(100);
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // query  state
 
@@ -639,7 +639,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         //bond
         let info = mock_info("stake_token_address", &[]);
@@ -720,7 +720,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond without bond
         let info = mock_info("staker1", &[]);
@@ -848,7 +848,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // try claiming before unbond
         let info = mock_info("staker1", &[]);
@@ -943,7 +943,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // bond again
         let info = mock_info("stake_token_address", &[]);
@@ -1089,7 +1089,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond
         let info = mock_info("staker1", &[]);
@@ -1207,7 +1207,7 @@ mod tests {
         let msg = ExecuteMsg::SetRewardPerSecond {
             reward_per_second: Uint128::from(1000u64),
         };
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // bond
         let info = mock_info("stake_token_address", &[]);

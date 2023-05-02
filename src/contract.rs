@@ -234,14 +234,12 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
 
 pub fn update_reward_index(
     state: &mut State,
-    mut now: Timestamp,
+    now: Timestamp,
     config: Config,
 ) -> Result<(), ContractError> {
     // new distribution balance = total reward supply * time elapsed since last update / time elapsed since start
     let seconds_since_last_updated = Uint128::from(
-        now.seconds()
-            .checked_sub(state.last_updated.seconds())
-            .unwrap_or(0),
+        now.seconds().saturating_sub(state.last_updated.seconds()),
     );
     let new_dist_balance = seconds_since_last_updated.checked_mul(config.reward_per_second)?;
 
@@ -302,13 +300,13 @@ pub fn execute_update_staker_rewards(
 }
 
 pub fn update_staker_rewards(
-    mut state: &mut State,
+    state: &mut State,
     now: Timestamp,
     stake_position: &mut StakePosition,
     config: Config,
 ) -> Result<Uint128, ContractError> {
     //update reward index
-    update_reward_index(&mut state, now, config)?;
+    update_reward_index(state, now, config)?;
 
     let index_diff = state.global_index - stake_position.index;
     // new distributed reward = index diff * position weight + dec rewards
