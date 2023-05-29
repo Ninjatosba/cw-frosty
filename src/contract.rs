@@ -237,10 +237,9 @@ pub fn update_reward_index(
     now: Timestamp,
     config: Config,
 ) -> Result<(), ContractError> {
-    // new distribution balance = total reward supply * time elapsed since last update / time elapsed since start
-    let seconds_since_last_updated = Uint128::from(
-        now.seconds().saturating_sub(state.last_updated.seconds()),
-    );
+    // new distribution balance = (now - last_updated) * reward_per_second
+    let seconds_since_last_updated =
+        Uint128::from(now.seconds().saturating_sub(state.last_updated.seconds()));
     let new_dist_balance = seconds_since_last_updated.checked_mul(config.reward_per_second)?;
 
     let divider = state.total_weight;
