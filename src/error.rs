@@ -54,6 +54,9 @@ pub enum ContractError {
     #[error("No Bond for duration sent")]
     NoBondForThisDuration {},
 
+    #[error("Reward per second must be greater than 0")]
+    InvalidRewardPerSecond {},
+
     #[error("Withdraw amount is higher than the bonded amount")]
     InsufficientStakedAmount {},
 

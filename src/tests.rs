@@ -174,210 +174,6 @@ mod tests {
     }
 
     #[test]
-    pub fn test_fund_reward() {
-        //instantiation
-        let mut deps = mock_dependencies();
-        let init_msg = default_init();
-        let env = mock_env();
-        let info = MessageInfo {
-            sender: Addr::unchecked("creator"),
-            funds: vec![],
-        };
-        let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
-
-        // fund reward with wrong end_time
-        let info = mock_info("reward_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.minus_seconds(100_000),
-            })
-            .unwrap(),
-        });
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(res, ContractError::InvalidRewardEndTime {});
-        // fund reward with wrong sender
-        let info = mock_info("wrong_cw20_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(res, ContractError::InvalidCw20TokenAddress {});
-
-        // update_reward_index before fund_reward
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        assert_eq!(res.attributes[1].value, "0".to_string());
-
-        //fund reward
-        let info = mock_info("reward_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        // update reward index after fund_reward but without any bond
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        assert_eq!(res.attributes[1].value, "0".to_string());
-
-        // bond
-        let info = mock_info("stake_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "staker1".to_string(),
-            amount: Uint128::new(100),
-            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        // update reward index after fund_reward and bond
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(100);
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        assert_eq!(
-            res.attributes[1].value,
-            "316.227766016837933299".to_string()
-        );
-
-        // change reward end time without any fund
-        let info = mock_info("reward_token_address", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(200);
-
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(0),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000_000),
-            })
-            .unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        // query  state
-        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
-        assert_eq!(
-            res.reward_end_time,
-            Timestamp::from_nanos(1671797619879305533)
-        );
-
-        // change reward end time with fund
-        let info = mock_info("reward_token_address", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(200);
-
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000_000),
-            })
-            .unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        // query  state
-        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
-        assert_eq!(
-            res.reward_end_time,
-            Timestamp::from_nanos(1671797619879305533)
-        );
-        assert_eq!(
-            res.global_index,
-            Decimal256::from_str("632.455532033675866598").unwrap()
-        );
-        assert_eq!(res.total_reward_supply, Uint128::new(199800000));
-
-        // test update reward after rewards end
-        //instantiation
-        let mut deps = mock_dependencies();
-        let init_msg = default_init();
-        let env = mock_env();
-        let info = MessageInfo {
-            sender: Addr::unchecked("creator"),
-            funds: vec![],
-        };
-        let _res = instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
-
-        // fund reward
-        let info = mock_info("reward_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_nanos(1000778265785652786),
-            })
-            .unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // bond staker1
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(47000900909);
-        let info = mock_info("stake_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "staker1".to_string(),
-            amount: Uint128::new(100),
-            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(2000778285);
-        let info = mock_info("stake_token_address", &[]);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "staker1".to_string(),
-            amount: Uint128::new(100),
-            msg: to_binary(&ReceiveMsg::Bond { duration_day: 10 }).unwrap(),
-        });
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        // update reward index
-        let info = mock_info("creator", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(470009007909);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // update reward index
-        let info = mock_info("creator", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(470009008909);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // update reward index
-        let info = mock_info("creator", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(470009009909);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // update reward index
-        let info = mock_info("creator", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_nanos(2000778285788952796);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
-        //check_state
-        let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
-        println!("{:?}", res);
-    }
-
-    #[test]
     pub fn test_update_reward_index() {
         // instantiate
         let mut deps = mock_dependencies();
@@ -391,7 +187,7 @@ mod tests {
         )
         .unwrap();
 
-        // update reward index no index update because no bond and rewards
+        // update reward index no index update because no bond and reward per second is 0
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::UpdateRewardIndex {};
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -412,38 +208,33 @@ mod tests {
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(100);
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
-        // still zero because no rewards is supplied
-        assert_eq!(res.attributes[1].value, "0".to_string());
+        // still zero because no reward per second
+        assert_eq!(res.attributes[2].value, "0".to_string());
 
-        // fund reward
-        let info = mock_info("reward_token_address", &[]);
-        let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(200);
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        // set reward per second
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::new(100),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // update reward index after fund reward
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
+        // update reward index after reward per second is set
         let mut env = mock_env();
         env.block.time = env.block.time.plus_seconds(100);
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // query  state
+
         let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
+        println!("{:?}", res);
         assert_eq!(
             res.global_index,
-            Decimal256::from_str("313.065488356669553966").unwrap()
+            Decimal256::from_str("31.622776601683793329").unwrap()
         );
-        //
-        assert_eq!(res.total_reward_claimed, Uint128::new(99000));
+        assert_eq!(res.total_reward_claimed, Uint128::new(10000));
     }
 
     #[test]
@@ -470,19 +261,13 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // fund reward
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
-
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::new(1000),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
 
         // update staker rewards
         let info = mock_info("staker1", &[]);
@@ -588,20 +373,12 @@ mod tests {
             amount: Uint128::new(100),
             msg: to_binary(&ReceiveMsg::Bond { duration_day: 36 }).unwrap(),
         });
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-        // fund rewards
-        // reward amount 100_000_000
-        // distrubuted in 100_000 seconds
-        let info = mock_info("reward_token_address", &[]);
-        let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // set reward per second
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // update staker rewards at 1000 seconds all reweards should be 100_000_000/100=1_000_000
@@ -652,16 +429,12 @@ mod tests {
         //fund rewards
         //reward amount 100_000_000
         //distrubuted in 100_000 seconds
-        let info = mock_info("reward_token_address", &[]);
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        // set reward per second
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         //bond
@@ -737,17 +510,12 @@ mod tests {
         let env = mock_env();
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-        //fund rewards
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond without bond
@@ -870,17 +638,12 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        //fund rewards
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // try claiming before unbond
@@ -948,6 +711,7 @@ mod tests {
             },
         );
         let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(claims.claims.len(), 0);
     }
 
     #[test]
@@ -969,17 +733,12 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        //fund rewards
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // bond again
@@ -1120,17 +879,12 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        //fund rewards
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond
@@ -1243,17 +997,12 @@ mod tests {
         let env = mock_env();
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-        //fund rewards
-        let info = mock_info("reward_token_address", &[]);
+        // set reward per second
+        let info = mock_info("creator", &[]);
         let env = mock_env();
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "creator".to_string(),
-            amount: Uint128::new(100_000_000),
-            msg: to_binary(&ReceiveMsg::RewardUpdate {
-                reward_end_time: env.block.time.plus_seconds(100_000),
-            })
-            .unwrap(),
-        });
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // bond
