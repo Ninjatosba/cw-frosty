@@ -249,10 +249,9 @@ pub fn update_reward_index(
         .unwrap_or(Decimal256::zero());
     if !state.total_weight.is_zero() {
         state.total_reward_claimed = state.total_reward_claimed.checked_add(new_dist_balance)?;
-
         state.global_index = state.global_index.add(adding_index);
-        state.last_updated = now;
     }
+    state.last_updated = now;
     Ok(())
 }
 
