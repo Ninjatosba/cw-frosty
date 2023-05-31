@@ -65,6 +65,9 @@ pub enum ContractError {
 
     #[error("Asset error")]
     AssetError {},
+
+    #[error("Invalid reward token denom")]
+    InvalidRewardTokenDenom {},
 }
 
 impl From<AssetError> for ContractError {

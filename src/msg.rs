@@ -3,10 +3,13 @@ use cw20::Cw20ReceiveMsg;
 
 use cosmwasm_std::{Decimal, Decimal256, Timestamp, Uint128};
 
+use crate::state::Denom;
+
 #[cw_serde]
 pub struct InstantiateMsg {
     pub stake_token_address: String,
-    pub reward_token_address: String,
+    pub reward_token_cw20: Option<String>,
+    pub reward_token_native: Option<String>,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,
@@ -72,7 +75,7 @@ pub struct StateResponse {
 #[cw_serde]
 pub struct ConfigResponse {
     pub stake_token_address: String,
-    pub reward_token_address: String,
+    pub reward_token_address: Denom,
     pub admin: String,
     pub fee_collector: String,
     pub force_claim_ratio: String,

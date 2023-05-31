@@ -6,8 +6,8 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        from_binary, to_binary, Addr, Coin, CosmosMsg, Decimal, Decimal256, MessageInfo, Response,
-        StdError, Timestamp, Uint128, WasmMsg,
+        coin, from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256,
+        MessageInfo, Response, StdError, Timestamp, Uint128, WasmMsg,
     };
     use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
@@ -24,7 +24,8 @@ mod tests {
     fn default_init() -> InstantiateMsg {
         InstantiateMsg {
             stake_token_address: "stake_token_address".to_string(),
-            reward_token_address: "reward_token_address".to_string(),
+            reward_token_cw20: Some("reward_token_address".to_string()),
+            reward_token_native: None,
             admin: None,
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
@@ -60,7 +61,8 @@ mod tests {
         let mut deps = mock_dependencies();
         let init_msg = InstantiateMsg {
             stake_token_address: "stake_token_address".to_string(),
-            reward_token_address: "reward_token_address".to_string(),
+            reward_token_cw20: Some("reward_token_address".to_string()),
+            reward_token_native: None,
             admin: Some("admin".to_string()),
             force_claim_ratio: Decimal::from_str("0.1").unwrap(),
             fee_collector: "fee_collector".to_string(),
@@ -1073,6 +1075,72 @@ mod tests {
                     amount: Uint128::new(180),
                 })
                 .unwrap(),
+            })
+        );
+    }
+    #[test]
+    pub fn test_native() {
+        // init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = InstantiateMsg {
+            stake_token_address: "stake_token_address".to_string(),
+            reward_token_cw20: None,
+            reward_token_native: Some("reward_token_native".to_string()),
+            admin: None,
+            force_claim_ratio: Decimal::from_str("0.1").unwrap(),
+            fee_collector: "fee_collector".to_string(),
+            max_bond_duration: 100,
+        };
+        let env = mock_env();
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
+
+        // set reward per second
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::SetRewardPerSecond {
+            reward_per_second: Uint128::from(1000u64),
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // bond
+        let info = mock_info("stake_token_address", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        // 100 second passed and staker 1 receives rewards = reward amount 100*1000=100000
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(100);
+        let msg = ExecuteMsg::ReceiveReward {};
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: "staker1".to_string(),
+                amount: vec![coin(100000, "reward_token_native")],
+            })
+        );
+
+        // 1000 second passed and staker 1 unbonds = reward amount 900*1000=900 000
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        let msg = ExecuteMsg::UnbondStake {
+            amount: None,
+            duration_as_days: 16,
+        };
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: "staker1".to_string(),
+                amount: vec![coin(900000, "reward_token_native")],
             })
         );
     }

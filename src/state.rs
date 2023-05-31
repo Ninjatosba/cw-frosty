@@ -14,6 +14,20 @@ pub struct State {
     pub last_updated: Timestamp,
 }
 
+#[cw_serde]
+pub enum Denom {
+    Native(String),
+    Cw20(Addr),
+}
+impl Denom {
+    pub fn to_string(&self) -> String {
+        match self {
+            Denom::Native(string) => string.to_string(),
+            Denom::Cw20(addr) => addr.to_string(),
+        }
+    }
+}
+
 pub const STATE: Item<State> = Item::new("state");
 
 #[cw_serde]
@@ -135,8 +149,10 @@ impl<'a> Claims<'a> {
 #[cw_serde]
 pub struct Config {
     pub admin: Addr,
+    // Stake token denom must be cw20
     pub stake_token_address: Addr,
-    pub reward_token_address: Addr,
+    // Reward token denom can be both cw20 or native token
+    pub reward_token_denom: Denom,
     pub force_claim_ratio: Decimal,
     pub fee_collector: Addr,
     pub max_bond_duration: u128,
