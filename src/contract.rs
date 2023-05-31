@@ -623,7 +623,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        reward_token_address: config.reward_token_denom.to_string(),
+        reward_token_address: config.reward_token_denom,
         stake_token_address: config.stake_token_address.to_string(),
         admin: config.admin.to_string(),
         fee_collector: config.fee_collector.to_string(),
