@@ -1,12 +1,13 @@
 use cosmwasm_schema::cw_serde;
-use cw20::Cw20ReceiveMsg;
+use cw20::{Cw20ReceiveMsg, Denom};
 
 use cosmwasm_std::{Decimal, Decimal256, Timestamp, Uint128};
 
 #[cw_serde]
 pub struct InstantiateMsg {
     pub stake_token_address: String,
-    pub reward_token_address: String,
+    pub reward_token_cw20: Option<String>,
+    pub reward_token_native: Option<String>,
     pub admin: Option<String>,
     pub force_claim_ratio: Decimal,
     pub fee_collector: String,

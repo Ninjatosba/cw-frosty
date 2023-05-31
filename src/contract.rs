@@ -14,7 +14,8 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Claims, Config, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS, STATE,
+    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS,
+    STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -35,8 +36,17 @@ pub fn instantiate(
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
     // validate stake_token_address
     let stake_token_address = deps.api.addr_validate(&msg.stake_token_address)?;
-    // validate reward_token_address
-    let reward_token_address = deps.api.addr_validate(&msg.reward_token_address)?;
+    // match reward token denom
+    let reward_token_denom = match (msg.reward_token_cw20, msg.reward_token_native) {
+        (Some(reward_token_cw20), None) => {
+            let reward_token_address = deps.api.addr_validate(&reward_token_cw20)?;
+            Denom::Cw20(reward_token_address)
+        }
+        (None, Some(reward_token_native)) => Denom::Native(reward_token_native),
+        _ => {
+            return Err(ContractError::InvalidRewardTokenDenom {});
+        }
+    };
     // validate max_bond_duration
     if msg.max_bond_duration < 1 {
         return Err(ContractError::InvalidMaxBondDuration {});
@@ -48,7 +58,7 @@ pub fn instantiate(
     let config = Config {
         admin: admin.clone(),
         stake_token_address,
-        reward_token_address,
+        reward_token_denom,
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
         max_bond_duration: msg.max_bond_duration,
@@ -73,7 +83,7 @@ pub fn instantiate(
         )
         .add_attribute(
             "reward_token_address",
-            config.reward_token_address.to_string(),
+            config.reward_token_denom.to_string(),
         )
         .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
         .add_attribute("fee_collector", config.fee_collector);
@@ -358,7 +368,10 @@ pub fn execute_receive_reward(
         })
         .sum();
     STATE.save(deps.storage, &state)?;
-    let reward_asset = Asset::cw20(config.reward_token_address, rewards);
+    let reward_asset = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),
+        Denom::Native(denom) => Asset::native(denom, rewards),
+    };
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
     let res = Response::new()
         .add_message(reward_msg)
@@ -423,7 +436,10 @@ pub fn execute_unbond(
     )?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
-    let reward_asset = Asset::cw20(config.reward_token_address, reward);
+    let reward_asset = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, reward),
+        Denom::Native(denom) => Asset::native(denom, reward),
+    };
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
 
     if reward > Uint128::zero() {
@@ -607,7 +623,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        reward_token_address: config.reward_token_address.to_string(),
+        reward_token_address: config.reward_token_denom.to_string(),
         stake_token_address: config.stake_token_address.to_string(),
         admin: config.admin.to_string(),
         fee_collector: config.fee_collector.to_string(),
