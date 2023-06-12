@@ -22,8 +22,8 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     UpdateRewardIndex {},
-    SetRewardPerSecond {
-        reward_per_second: Uint128,
+    SetRewardPerBlock {
+        reward_per_block: Uint128,
     },
     ForceClaim {
         release_at: Timestamp,
@@ -52,6 +52,7 @@ pub enum ExecuteMsg {
 
 pub enum ReceiveMsg {
     Bond { duration_day: u128 },
+    SetRewardPerBlock { reward_per_block: Uint128 },
 }
 
 #[cw_serde]

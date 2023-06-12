@@ -119,8 +119,8 @@ pub fn execute(
             force_claim_ratio,
         } => execute_update_config(deps, env, info, force_claim_ratio, fee_collector, admin),
         ExecuteMsg::ForceClaim { release_at } => execute_force_claim(deps, env, info, release_at),
-        ExecuteMsg::SetRewardPerSecond { reward_per_second } => {
-            execute_set_reward_per_second(deps, env, info, reward_per_second)
+        ExecuteMsg::SetRewardPerBlock { reward_per_block } => {
+            execute_set_reward_per_second(deps, env, info, reward_per_block, None)
         }
     }
 }
@@ -141,6 +141,9 @@ pub fn execute_receive(
     };
     match msg {
         ReceiveMsg::Bond { duration_day } => execute_bond(deps, env, balance, duration_day),
+        ReceiveMsg::SetRewardPerBlock { reward_per_block } => {
+            execute_set_reward_per_second(deps, env, info, reward_per_block, Some(balance))
+        }
     }
 }
 
