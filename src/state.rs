@@ -11,7 +11,7 @@ pub struct State {
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
     pub total_reward_claimed: Uint128,
-    pub last_updated: Timestamp,
+    pub last_updated_block: u64,
 }
 
 #[cw_serde]
@@ -91,14 +91,14 @@ impl<'a> Claims<'a> {
         &self,
         store: &dyn Storage,
         address: Addr,
-        now: u64,
+        now_time: u64,
     ) -> StdResult<Vec<Claim>> {
         self.0
             .sub_prefix(address)
             .range(
                 store,
                 None,
-                Some(Bound::exclusive((now + 1, 0))),
+                Some(Bound::exclusive((now_time + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(_, v)| v))
@@ -109,14 +109,14 @@ impl<'a> Claims<'a> {
         &self,
         store: &mut dyn Storage,
         address: Addr,
-        now: u64,
+        now_time: u64,
     ) -> Result<(), ContractError> {
         self.0
             .sub_prefix(address.clone())
             .range(
                 store,
                 None,
-                Some(Bound::exclusive((now + 1, 0))),
+                Some(Bound::exclusive((now_time + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(k, _v)| k))
@@ -129,14 +129,14 @@ impl<'a> Claims<'a> {
         &self,
         store: &mut dyn Storage,
         address: Addr,
-        release_at: u64,
+        release_at_time: u64,
     ) -> Result<(), ContractError> {
         self.0
             .sub_prefix(address.clone())
             .range(
                 store,
-                Some(Bound::inclusive((release_at, 0))),
-                Some(Bound::exclusive((release_at + 1, 0))),
+                Some(Bound::inclusive((release_at_time, 0))),
+                Some(Bound::exclusive((release_at_time + 1, 0))),
                 Order::Ascending,
             )
             .map(|x| x.map(|(k, _v)| k))
@@ -156,7 +156,9 @@ pub struct Config {
     pub force_claim_ratio: Decimal,
     pub fee_collector: Addr,
     pub max_bond_duration: u128,
-    pub reward_per_second: Uint128,
+    pub reward_per_block: Uint128,
+    pub total_reward: Uint128,
+    pub reward_end_block: u64,
 }
 
 pub struct CW20Balance {
@@ -171,7 +173,7 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub struct StakePosition {
     pub staked_amount: Uint128,
     pub index: Decimal256,
-    pub bond_time: Timestamp,
+    pub bond_time_block: u64,
     pub unbond_duration_as_days: u128,
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,

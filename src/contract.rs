@@ -5,8 +5,9 @@ use cosmwasm_std::{
 use cosmwasm_std::{from_slice, CosmosMsg};
 use cw0::maybe_addr;
 
-use cw20::Cw20ReceiveMsg;
+use cw20::{Balance, Cw20ReceiveMsg};
 use cw_asset::Asset;
+use serde::de::value::Error;
 
 use crate::helper::{days_to_seconds, get_decimals};
 use crate::msg::{
@@ -30,13 +31,13 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    // validate admin address
+    // Validate admin address
     let admin = maybe_addr(deps.api, msg.admin)?.unwrap_or_else(|| info.sender.clone());
-    // validate fee_collector address
+    // Validate fee_collector address
     let fee_collector_address = deps.api.addr_validate(&msg.fee_collector)?;
-    // validate stake_token_address
+    // Validate stake_token_address
     let stake_token_address = deps.api.addr_validate(&msg.stake_token_address)?;
-    // match reward token denom
+    // Match reward token denom
     let reward_token_denom = match (msg.reward_token_cw20, msg.reward_token_native) {
         (Some(reward_token_cw20), None) => {
             let reward_token_address = deps.api.addr_validate(&reward_token_cw20)?;
@@ -47,10 +48,11 @@ pub fn instantiate(
             return Err(ContractError::InvalidRewardTokenDenom {});
         }
     };
-    // validate max_bond_duration
+    // Validate max_bond_duration
     if msg.max_bond_duration < 1 {
         return Err(ContractError::InvalidMaxBondDuration {});
     }
+    // Validate force_claim_ratio
     if (msg.force_claim_ratio < Decimal::zero()) || (msg.force_claim_ratio >= Decimal::one()) {
         return Err(ContractError::InvalidForceClaimRatio {});
     }
@@ -62,7 +64,9 @@ pub fn instantiate(
         force_claim_ratio: msg.force_claim_ratio,
         fee_collector: fee_collector_address,
         max_bond_duration: msg.max_bond_duration,
-        reward_per_second: Uint128::zero(),
+        reward_per_block: Uint128::zero(),
+        total_reward: Uint128::zero(),
+        reward_end_block: 0,
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -71,7 +75,7 @@ pub fn instantiate(
         total_staked: Uint128::zero(),
         total_weight: Decimal256::zero(),
         total_reward_claimed: Uint128::zero(),
-        last_updated: env.block.time,
+        last_updated_block: env.block.height,
     };
     STATE.save(deps.storage, &state)?;
     let res = Response::default()
@@ -572,7 +576,8 @@ pub fn execute_set_reward_per_second(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
-    reward_per_second: Uint128,
+    reward_per_block: Uint128,
+    balance: Option<CW20Balance>,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let mut config = CONFIG.load(deps.storage)?;
@@ -580,17 +585,58 @@ pub fn execute_set_reward_per_second(
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     };
-    if reward_per_second <= Uint128::zero() {
+    if reward_per_block <= Uint128::zero() {
         return Err(ContractError::InvalidRewardPerSecond {});
     };
+    let reward_end_block;
+    let total_reward;
+    // match denom and expect that token denom
+    match config.reward_token_denom {
+        Denom::Cw20(denom) => {
+            // If config denom is cw-20 then this execute function should be called with balance
+            let amount = balance
+                .unwrap_or_else(return Err(ContractError::InvalidRewardTokenDenom {}))
+                .amount;
+
+            if amount.is_zero() {
+                return Err(ContractError::NoFund {});
+            }
+            if denom != balance.unwrap().denom {
+                return Err(ContractError::InvalidRewardTokenDenom {});
+            }
+            // Reward per block or amount can not be zero thats why we are unwraping
+            let reward_duration_block = amount.checked_div(reward_per_block).unwrap();
+            reward_end_block = env.block.height + reward_duration_block.u128() as u64;
+            total_reward = amount;
+        }
+        Denom::Native(denom) => {
+            let amount = info.funds.iter().find(|c| c.denom == denom);
+            if amount.is_none() || amount.unwrap().amount.is_zero() {
+                return Err(ContractError::NoFund {});
+            }
+            // Reward per block or amount can not be zero thats why we are unwraping
+            let reward_duration_block = amount
+                .unwrap()
+                .amount
+                .checked_div(reward_per_block)
+                .unwrap();
+            reward_end_block = env.block.height + reward_duration_block.u128() as u64;
+            total_reward = amount.unwrap().amount;
+        }
+    };
     update_reward_index(&mut state, env.block.time, config.clone())?;
+    // Set rewards
+    config.reward_per_block = reward_per_block;
+    config.reward_end_block = reward_end_block;
+    config.total_reward = total_reward;
+    state.last_updated_block = env.block.height;
     STATE.save(deps.storage, &state)?;
-    config.reward_per_second = reward_per_second;
     CONFIG.save(deps.storage, &config)?;
     Ok(Response::default()
         .add_attribute("action", "set_reward_per_second".to_string())
-        .add_attribute("reward_per_second", reward_per_second.to_string()))
+        .add_attribute("reward_per_second", reward_per_block.to_string()))
 }
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
