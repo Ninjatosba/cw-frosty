@@ -76,6 +76,8 @@ pub enum ContractError {
 
     #[error("Overflow error")]
     OverflowError {},
+
+    
 }
 
 impl From<AssetError> for ContractError {

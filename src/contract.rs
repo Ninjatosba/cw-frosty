@@ -261,6 +261,7 @@ pub fn update_reward_index(
     // Check if current block is greater reward end block if yes then we should update the index as if now is end block(Distributing last rewards)
     // Also change status to ended
     // Status can only be changed to ended here
+
     if now_block > config.reward_end_block {
         now_block = config.reward_end_block;
         state.status = Status::Ended;
@@ -275,7 +276,8 @@ pub fn update_reward_index(
     // Status can only be changed to Active here
     // new index = old_index + new_distribution_balance / total_weight
     let incrementer = Decimal256::from_ratio(new_distribution_balance, Uint128::one())
-        .checked_div(state.total_weight)?;
+        .checked_div(state.total_weight)
+        .unwrap_or(Decimal256::zero());
     // If incrementer is greater than zero then this means there are some bond and rewards to distribute
     // So we can assume that this reward is claimed even though it is not transfered to the positions
     if incrementer > Decimal256::zero() {
@@ -599,9 +601,6 @@ pub fn execute_set_reward_per_second(
     let mut state = STATE.load(deps.storage)?;
     let mut config = CONFIG.load(deps.storage)?;
 
-    if info.sender != config.admin {
-        return Err(ContractError::Unauthorized {});
-    };
     if reward_per_block <= Uint128::zero() {
         return Err(ContractError::InvalidRewardPerSecond {});
     };
