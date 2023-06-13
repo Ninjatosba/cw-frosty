@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction, MessageInfo,
-    Order, Response, StdResult, Timestamp, Uint128, Uint256,
+    entry_point, to_binary, Addr, Binary, Decimal, Decimal256, Deps, DepsMut, Env, Fraction,
+    MessageInfo, Order, Response, StdResult, Timestamp, Uint128, Uint256,
 };
 use cosmwasm_std::{from_slice, CosmosMsg};
 use cw0::maybe_addr;
@@ -175,7 +175,7 @@ pub fn execute_bond(
     let staker = STAKERS.may_load(deps.storage, (&balance.sender, duration))?;
     match staker {
         Some(mut staker) => {
-            update_staker_rewards(&mut state, env.block.time, &mut staker, cfg)?;
+            update_staker_rewards(&mut state, env.block.height, &mut staker, cfg)?;
             // add to existing staker
             staker.staked_amount = staker.staked_amount.add(amount);
             // update total weight. Its a bit tricky to update total weight so i remove the old weight and add new weight.
@@ -201,7 +201,7 @@ pub fn execute_bond(
         }
         None => {
             // create new staker
-            update_reward_index(&mut state, env.block.time, cfg)?;
+            update_reward_index(&mut state, env.block.height, cfg)?;
             let position_weight = Decimal256::from_ratio(duration, Uint128::one())
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
@@ -213,7 +213,7 @@ pub fn execute_bond(
                 unbond_duration_as_days: duration,
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),
-                last_claimed: env.block.time,
+                last_claimed: env.block.height,
                 position_weight,
             };
             state.total_weight = state.total_weight.add(position_weight);
@@ -237,7 +237,7 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
 
-    update_reward_index(&mut state, env.block.time, config)?;
+    update_reward_index(&mut state, env.block.height, config)?;
 
     STATE.save(deps.storage, &state)?;
 
@@ -261,7 +261,9 @@ pub fn update_reward_index(
         now_block = config.reward_end_block;
     }
     // new distribution balance = (now - last_updated) * reward_per_block
-    let blocks_passed = now_block.checked_sub(state.last_updated_block)?;
+    let blocks_passed = now_block
+        .checked_sub(state.last_updated_block)
+        .ok_or(ContractError::OverflowError {})?;
     let new_distribution_balance = Uint128::from(blocks_passed) * config.reward_per_block;
 
     // new index = old_index + new_distribution_balance / total_weight
@@ -293,7 +295,7 @@ pub fn execute_update_staker_rewards(
         .filter(|(staker, _)| staker.0 == addr)
         .map(|(_, mut staker)| {
             let reward =
-                update_staker_rewards(&mut state, env.block.time, &mut staker, config.clone())
+                update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())
                     .unwrap_or(Uint128::zero());
             STAKERS
                 .save(
@@ -316,12 +318,12 @@ pub fn execute_update_staker_rewards(
 
 pub fn update_staker_rewards(
     state: &mut State,
-    now: Timestamp,
+    now_block: u64,
     stake_position: &mut StakePosition,
     config: Config,
 ) -> Result<Uint128, ContractError> {
     //update reward index
-    update_reward_index(state, now, config)?;
+    update_reward_index(state, now_block, config)?;
 
     let index_diff = state.global_index - stake_position.index;
     // new distributed reward = index diff * position weight + dec rewards
@@ -341,7 +343,7 @@ pub fn update_staker_rewards(
     // update stakers index
     stake_position.index = state.global_index;
     // update last claimed time. This is used to return data for the reward calculation
-    stake_position.last_claimed = now;
+    stake_position.last_claimed = now_block;
     Ok(stake_position.pending_rewards)
 }
 
@@ -360,7 +362,7 @@ pub fn execute_receive_reward(
         .into_iter()
         .map(|(_, mut staker)| {
             let reward =
-                update_staker_rewards(&mut state, env.block.time, &mut staker, config.clone())
+                update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())
                     .unwrap();
             // set pending rewards to zero.
             staker.pending_rewards = Uint128::zero();
@@ -400,7 +402,7 @@ pub fn execute_unbond(
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration_as_days))?;
     // rewards for desired duration is updated and pending rewards are set to zero
-    let reward = update_staker_rewards(&mut state, env.block.time, &mut staker, config.clone())?;
+    let reward = update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())?;
     staker.pending_rewards = Uint128::zero();
 
     let unbond_amount = match amount {
@@ -593,45 +595,60 @@ pub fn execute_set_reward_per_second(
     };
     let reward_end_block;
     let total_reward;
+    let amount: Uint128;
+    // Distribute rewards prior to changing reward per block
+    update_reward_index(&mut state, env.block.height, config.clone());
     // match denom and expect that token denom
     match config.reward_token_denom {
         Denom::Cw20(denom) => {
-            // If config denom is cw-20 then this execute function should be called with balance
-            let amount = balance
-                .unwrap_or_else(return Err(ContractError::InvalidRewardTokenDenom {}))
-                .amount;
-
-            if amount.is_zero() {
+            // If the config denom is cw-20, execute this function with the balance
+            if let Some(balance) = balance {
+                if balance.amount.is_zero() {
+                    return Err(ContractError::NoFund {});
+                }
+                if balance.denom != denom {
+                    return Err(ContractError::InvalidRewardTokenDenom {});
+                }
+                if balance.sender != config.admin {
+                    return Err(ContractError::Unauthorized {});
+                }
+                amount = balance.amount;
+            } else {
                 return Err(ContractError::NoFund {});
             }
-            if denom != balance.unwrap().denom {
-                return Err(ContractError::InvalidRewardTokenDenom {});
-            }
-            // Reward per block or amount can not be zero thats why we are unwraping
-            let reward_duration_block = amount.checked_div(reward_per_block).unwrap();
-            reward_end_block = env.block.height + reward_duration_block.u128() as u64;
-            total_reward = amount;
         }
         Denom::Native(denom) => {
-            let amount = info.funds.iter().find(|c| c.denom == denom);
-            if amount.is_none() || amount.unwrap().amount.is_zero() {
+            // If the config denom is native, this function should be executed with the execute
+            let funds = info
+                .funds
+                .iter()
+                .find(|f| f.denom == denom)
+                .ok_or(ContractError::NoFund {})?;
+            if (funds.amount).is_zero() {
                 return Err(ContractError::NoFund {});
             }
-            // Reward per block or amount can not be zero thats why we are unwraping
-            let reward_duration_block = amount
-                .unwrap()
-                .amount
-                .checked_div(reward_per_block)
-                .unwrap();
-            reward_end_block = env.block.height + reward_duration_block.u128() as u64;
-            total_reward = amount.unwrap().amount;
+            if (info.sender != config.admin) {
+                return Err(ContractError::Unauthorized {});
+            }
+            amount = funds.amount;
         }
     };
-    update_reward_index(&mut state, env.block.time, config.clone())?;
+    // Calculate how much undistributed reward is left
+    let undistributed_reward = config
+        .total_reward
+        .checked_sub(state.total_reward_claimed)?;
+    total_reward = amount.checked_add(undistributed_reward)?;
+
+    // Calculate how many blocks this reward would last
+    let reward_duration_block = total_reward
+        .checked_div(reward_per_block)
+        .unwrap_or(Uint128::zero());
+    reward_end_block = env.block.height + reward_duration_block.u128() as u64;
     // Set rewards
     config.reward_per_block = reward_per_block;
     config.reward_end_block = reward_end_block;
     config.total_reward = total_reward;
+    // TODO: check if this is needed
     state.last_updated_block = env.block.height;
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
@@ -640,112 +657,112 @@ pub fn execute_set_reward_per_second(
         .add_attribute("reward_per_second", reward_per_block.to_string()))
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
-        QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
-        QueryMsg::StakerForDuration { address, duration } => {
-            to_binary(&query_staker_for_duration(env, deps, address, duration)?)
-        }
-        QueryMsg::StakerForAllDuration { address } => {
-            to_binary(&query_staker_for_all_duration(deps, env, address)?)
-        }
-        QueryMsg::ListClaims { address } => to_binary(&query_list_claims(env, deps, address)?),
-    }
-}
+// #[cfg_attr(not(feature = "library"), entry_point)]
+// pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+//     match msg {
+//         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
+//         QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
+//         QueryMsg::StakerForDuration { address, duration } => {
+//             to_binary(&query_staker_for_duration(env, deps, address, duration)?)
+//         }
+//         QueryMsg::StakerForAllDuration { address } => {
+//             to_binary(&query_staker_for_all_duration(deps, env, address)?)
+//         }
+//         QueryMsg::ListClaims { address } => to_binary(&query_list_claims(env, deps, address)?),
+//     }
+// }
 
-pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
-    let state = STATE.load(deps.storage)?;
+// pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
+//     let state = STATE.load(deps.storage)?;
 
-    Ok(StateResponse {
-        global_index: state.global_index,
-        total_staked: state.total_staked,
-        total_weight: state.total_weight,
-        total_reward_claimed: state.total_reward_claimed,
-        last_updated: state.last_updated,
-    })
-}
+//     Ok(StateResponse {
+//         global_index: state.global_index,
+//         total_staked: state.total_staked,
+//         total_weight: state.total_weight,
+//         total_reward_claimed: state.total_reward_claimed,
+//         last_updated: state.last_updated,
+//     })
+// }
 
-//query config
-pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
-    let config = CONFIG.load(deps.storage)?;
+// //query config
+// pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
+//     let config = CONFIG.load(deps.storage)?;
 
-    Ok(ConfigResponse {
-        reward_token_address: config.reward_token_denom,
-        stake_token_address: config.stake_token_address.to_string(),
-        admin: config.admin.to_string(),
-        fee_collector: config.fee_collector.to_string(),
-        force_claim_ratio: config.force_claim_ratio.to_string(),
-        reward_per_second: config.reward_per_second,
-    })
-}
+//     Ok(ConfigResponse {
+//         reward_token_address: config.reward_token_denom,
+//         stake_token_address: config.stake_token_address.to_string(),
+//         admin: config.admin.to_string(),
+//         fee_collector: config.fee_collector.to_string(),
+//         force_claim_ratio: config.force_claim_ratio.to_string(),
+//         reward_per_second: config.reward_per_second,
+//     })
+// }
 
-pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
-    let addr = deps.api.addr_validate(&address)?;
-    let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
-    let claims: Vec<ClaimResponse> = claim
-        .into_iter()
-        .map(|claim| ClaimResponse {
-            amount: claim.amount,
-            release_at: claim.release_at,
-            unbond_at: claim.unbond_at,
-        })
-        .collect();
-    Ok(ListClaimsResponse { claims })
-}
+// pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
+//     let addr = deps.api.addr_validate(&address)?;
+//     let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
+//     let claims: Vec<ClaimResponse> = claim
+//         .into_iter()
+//         .map(|claim| ClaimResponse {
+//             amount: claim.amount,
+//             release_at: claim.release_at,
+//             unbond_at: claim.unbond_at,
+//         })
+//         .collect();
+//     Ok(ListClaimsResponse { claims })
+// }
 
-pub fn query_staker_for_duration(
-    _env: Env,
-    deps: Deps,
-    address: String,
-    duration: u128,
-) -> StdResult<StakerResponse> {
-    let addr = deps.api.addr_validate(address.as_str())?;
-    let staker = STAKERS.load(deps.storage, (&addr, duration))?;
+// pub fn query_staker_for_duration(
+//     _env: Env,
+//     deps: Deps,
+//     address: String,
+//     duration: u128,
+// ) -> StdResult<StakerResponse> {
+//     let addr = deps.api.addr_validate(address.as_str())?;
+//     let staker = STAKERS.load(deps.storage, (&addr, duration))?;
 
-    Ok(StakerResponse {
-        staked_amount: staker.staked_amount,
-        index: staker.index,
-        bond_time: staker.bond_time,
-        unbond_duration_as_days: staker.unbond_duration_as_days,
-        pending_rewards: staker.pending_rewards,
-        dec_rewards: staker.dec_rewards,
-        last_claimed: staker.last_claimed,
-        position_weight: staker.position_weight,
-    })
-}
-//query all holders list
-pub fn query_staker_for_all_duration(
-    deps: Deps,
-    _env: Env,
-    address: String,
-) -> StdResult<StakerForAllDurationResponse> {
-    let addr = deps.api.addr_validate(&address)?;
-    //return all stakers of address
-    let positions: Vec<StakerResponse> = STAKERS
-        .prefix(&addr)
-        .range(deps.storage, None, None, Order::Ascending)
-        .map(|item| {
-            let (_key, value) = item.unwrap();
+//     Ok(StakerResponse {
+//         staked_amount: staker.staked_amount,
+//         index: staker.index,
+//         bond_time: staker.bond_time,
+//         unbond_duration_as_days: staker.unbond_duration_as_days,
+//         pending_rewards: staker.pending_rewards,
+//         dec_rewards: staker.dec_rewards,
+//         last_claimed: staker.last_claimed,
+//         position_weight: staker.position_weight,
+//     })
+// }
+// //query all holders list
+// pub fn query_staker_for_all_duration(
+//     deps: Deps,
+//     _env: Env,
+//     address: String,
+// ) -> StdResult<StakerForAllDurationResponse> {
+//     let addr = deps.api.addr_validate(&address)?;
+//     //return all stakers of address
+//     let positions: Vec<StakerResponse> = STAKERS
+//         .prefix(&addr)
+//         .range(deps.storage, None, None, Order::Ascending)
+//         .map(|item| {
+//             let (_key, value) = item.unwrap();
 
-            StakerResponse {
-                staked_amount: value.staked_amount,
-                index: value.index,
-                bond_time: value.bond_time,
-                unbond_duration_as_days: value.unbond_duration_as_days,
-                pending_rewards: value.pending_rewards,
-                dec_rewards: value.dec_rewards,
-                last_claimed: value.last_claimed,
-                position_weight: value.position_weight,
-            }
-        })
-        .collect();
+//             StakerResponse {
+//                 staked_amount: value.staked_amount,
+//                 index: value.index,
+//                 bond_time: value.bond_time,
+//                 unbond_duration_as_days: value.unbond_duration_as_days,
+//                 pending_rewards: value.pending_rewards,
+//                 dec_rewards: value.dec_rewards,
+//                 last_claimed: value.last_claimed,
+//                 position_weight: value.position_weight,
+//             }
+//         })
+//         .collect();
 
-    Ok(StakerForAllDurationResponse { positions })
-}
+//     Ok(StakerForAllDurationResponse { positions })
+// }
 
-#[cfg(not(feature = "library"))]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
-}
+// #[cfg(not(feature = "library"))]
+// pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+//     Ok(Response::default())
+// }
