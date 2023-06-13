@@ -184,7 +184,7 @@ pub struct StakePosition {
     pub unbond_duration_as_days: u128,
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,
-    pub last_claimed: u64,
+    pub last_claimed_block: u64,
     pub position_weight: Decimal256,
 }
 

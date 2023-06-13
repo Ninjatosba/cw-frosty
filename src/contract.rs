@@ -66,7 +66,8 @@ pub fn instantiate(
         max_bond_duration: msg.max_bond_duration,
         reward_per_block: Uint128::zero(),
         total_reward: Uint128::zero(),
-        reward_end_block: 0,
+        // TODO Check if this is correct
+        reward_end_block: env.block.height,
     };
     CONFIG.save(deps.storage, &config)?;
     //set state
@@ -173,12 +174,13 @@ pub fn execute_bond(
     let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
     let staker = STAKERS.may_load(deps.storage, (&balance.sender, duration))?;
+
     match staker {
         Some(mut staker) => {
             update_staker_rewards(&mut state, env.block.height, &mut staker, cfg)?;
             // add to existing staker
             staker.staked_amount = staker.staked_amount.add(amount);
-            // update total weight. Its a bit tricky to update total weight so i remove the old weight and add new weight.
+            // update total weight. Its a bit tricky to update total weight so I removed the old weight and add new weight.
             let _new_weight = Decimal256::from_ratio(duration, Uint128::one())
                 .sqrt()
                 .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
@@ -213,7 +215,7 @@ pub fn execute_bond(
                 unbond_duration_as_days: duration,
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),
-                last_claimed: env.block.height,
+                last_claimed_block: env.block.height,
                 position_weight,
             };
             state.total_weight = state.total_weight.add(position_weight);
@@ -256,19 +258,29 @@ pub fn update_reward_index(
     mut now_block: u64,
     config: Config,
 ) -> Result<(), ContractError> {
-    // Check if current block is greater reward end block if yes then we should update the index as if now is end block
+    // Check if current block is greater reward end block if yes then we should update the index as if now is end block(Distributing last rewards)
+    // Also change status to ended
+    // Status can only be changed to ended here
     if now_block > config.reward_end_block {
         now_block = config.reward_end_block;
+        state.status = Status::Ended;
     }
     // new distribution balance = (now - last_updated) * reward_per_block
     let blocks_passed = now_block
         .checked_sub(state.last_updated_block)
         .ok_or(ContractError::OverflowError {})?;
     let new_distribution_balance = Uint128::from(blocks_passed) * config.reward_per_block;
-
+    // If there is any balance to distribute and status is Pending then this means this is the first update after reward start
+    // Change the status to Active
+    // Status can only be changed to Active here
     // new index = old_index + new_distribution_balance / total_weight
     let incrementer = Decimal256::from_ratio(new_distribution_balance, Uint128::one())
         .checked_div(state.total_weight)?;
+    // If incrementer is greater than zero then this means there are some bond and rewards to distribute
+    // So we can assume that this reward is claimed even though it is not transfered to the positions
+    if incrementer > Decimal256::zero() {
+        state.total_reward_claimed = state.total_reward_claimed.add(new_distribution_balance);
+    }
     state.global_index = state.global_index + incrementer;
     state.last_updated_block = now_block;
     Ok(())
@@ -343,7 +355,7 @@ pub fn update_staker_rewards(
     // update stakers index
     stake_position.index = state.global_index;
     // update last claimed time. This is used to return data for the reward calculation
-    stake_position.last_claimed = now_block;
+    stake_position.last_claimed_block = now_block;
     Ok(stake_position.pending_rewards)
 }
 
@@ -598,8 +610,8 @@ pub fn execute_set_reward_per_second(
     let amount: Uint128;
     let admin = config.clone().admin;
     // Distribute rewards prior to changing reward per block
-    update_reward_index(&mut state, env.block.height, config.clone());
-    // match denom and expect that token denom
+    update_reward_index(&mut state, env.block.height, config.clone())?;
+    // Match reward denom and expect that token denom in tx
     match config.clone().reward_token_denom {
         Denom::Cw20(denom) => {
             // If the config denom is cw-20, execute this function with the balance
@@ -642,6 +654,9 @@ pub fn execute_set_reward_per_second(
     total_reward = amount.checked_add(undistributed_reward)?;
 
     // Calculate how many blocks this reward would last
+    // We are floring this value e.g. Admin sends 1_000_000 reward and sets reward_per_block to 24
+    // This means that the reward will last for 41_666.666666 blocks
+    // We are flooring this value to 41_666 blocks
     let reward_duration_block = total_reward
         .checked_div(reward_per_block)
         .unwrap_or(Uint128::zero());
@@ -652,6 +667,9 @@ pub fn execute_set_reward_per_second(
     config.total_reward = total_reward;
     // TODO: check if this is needed
     state.last_updated_block = env.block.height;
+    if state.status == Status::Pending || state.status == Status::Ended {
+        state.status = Status::Distribution;
+    }
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
     Ok(Response::default()
@@ -659,112 +677,112 @@ pub fn execute_set_reward_per_second(
         .add_attribute("reward_per_second", reward_per_block.to_string()))
 }
 
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
-//     match msg {
-//         QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
-//         QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
-//         QueryMsg::StakerForDuration { address, duration } => {
-//             to_binary(&query_staker_for_duration(env, deps, address, duration)?)
-//         }
-//         QueryMsg::StakerForAllDuration { address } => {
-//             to_binary(&query_staker_for_all_duration(deps, env, address)?)
-//         }
-//         QueryMsg::ListClaims { address } => to_binary(&query_list_claims(env, deps, address)?),
-//     }
-// }
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::State {} => to_binary(&query_state(deps, env, msg)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps, env, msg)?),
+        QueryMsg::StakerForDuration { address, duration } => {
+            to_binary(&query_staker_for_duration(env, deps, address, duration)?)
+        }
+        QueryMsg::StakerForAllDuration { address } => {
+            to_binary(&query_staker_for_all_duration(deps, env, address)?)
+        }
+        QueryMsg::ListClaims { address } => to_binary(&query_list_claims(env, deps, address)?),
+    }
+}
 
-// pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
-//     let state = STATE.load(deps.storage)?;
+pub fn query_state(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<StateResponse> {
+    let state = STATE.load(deps.storage)?;
 
-//     Ok(StateResponse {
-//         global_index: state.global_index,
-//         total_staked: state.total_staked,
-//         total_weight: state.total_weight,
-//         total_reward_claimed: state.total_reward_claimed,
-//         last_updated: state.last_updated,
-//     })
-// }
+    Ok(StateResponse {
+        global_index: state.global_index,
+        total_staked: state.total_staked,
+        total_weight: state.total_weight,
+        total_reward_claimed: state.total_reward_claimed,
+        last_updated_block: state.last_updated_block,
+    })
+}
 
-// //query config
-// pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
-//     let config = CONFIG.load(deps.storage)?;
+//query config
+pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
 
-//     Ok(ConfigResponse {
-//         reward_token_address: config.reward_token_denom,
-//         stake_token_address: config.stake_token_address.to_string(),
-//         admin: config.admin.to_string(),
-//         fee_collector: config.fee_collector.to_string(),
-//         force_claim_ratio: config.force_claim_ratio.to_string(),
-//         reward_per_second: config.reward_per_second,
-//     })
-// }
+    Ok(ConfigResponse {
+        reward_token_address: config.reward_token_denom,
+        stake_token_address: config.stake_token_address.to_string(),
+        admin: config.admin.to_string(),
+        fee_collector: config.fee_collector.to_string(),
+        force_claim_ratio: config.force_claim_ratio.to_string(),
+        reward_per_block: config.reward_per_block,
+    })
+}
 
-// pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
-//     let addr = deps.api.addr_validate(&address)?;
-//     let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
-//     let claims: Vec<ClaimResponse> = claim
-//         .into_iter()
-//         .map(|claim| ClaimResponse {
-//             amount: claim.amount,
-//             release_at: claim.release_at,
-//             unbond_at: claim.unbond_at,
-//         })
-//         .collect();
-//     Ok(ListClaimsResponse { claims })
-// }
+pub fn query_list_claims(_env: Env, deps: Deps, address: String) -> StdResult<ListClaimsResponse> {
+    let addr = deps.api.addr_validate(&address)?;
+    let claim = Claims::new(CLAIMS_KEY).load_all(deps.storage, addr)?;
+    let claims: Vec<ClaimResponse> = claim
+        .into_iter()
+        .map(|claim| ClaimResponse {
+            amount: claim.amount,
+            release_at: claim.release_at,
+            unbond_at: claim.unbond_at,
+        })
+        .collect();
+    Ok(ListClaimsResponse { claims })
+}
 
-// pub fn query_staker_for_duration(
-//     _env: Env,
-//     deps: Deps,
-//     address: String,
-//     duration: u128,
-// ) -> StdResult<StakerResponse> {
-//     let addr = deps.api.addr_validate(address.as_str())?;
-//     let staker = STAKERS.load(deps.storage, (&addr, duration))?;
+pub fn query_staker_for_duration(
+    _env: Env,
+    deps: Deps,
+    address: String,
+    duration: u128,
+) -> StdResult<StakerResponse> {
+    let addr = deps.api.addr_validate(address.as_str())?;
+    let staker = STAKERS.load(deps.storage, (&addr, duration))?;
 
-//     Ok(StakerResponse {
-//         staked_amount: staker.staked_amount,
-//         index: staker.index,
-//         bond_time: staker.bond_time,
-//         unbond_duration_as_days: staker.unbond_duration_as_days,
-//         pending_rewards: staker.pending_rewards,
-//         dec_rewards: staker.dec_rewards,
-//         last_claimed: staker.last_claimed,
-//         position_weight: staker.position_weight,
-//     })
-// }
-// //query all holders list
-// pub fn query_staker_for_all_duration(
-//     deps: Deps,
-//     _env: Env,
-//     address: String,
-// ) -> StdResult<StakerForAllDurationResponse> {
-//     let addr = deps.api.addr_validate(&address)?;
-//     //return all stakers of address
-//     let positions: Vec<StakerResponse> = STAKERS
-//         .prefix(&addr)
-//         .range(deps.storage, None, None, Order::Ascending)
-//         .map(|item| {
-//             let (_key, value) = item.unwrap();
+    Ok(StakerResponse {
+        staked_amount: staker.staked_amount,
+        index: staker.index,
+        bond_block: staker.bond_time_block,
+        unbond_duration_as_days: staker.unbond_duration_as_days,
+        pending_rewards: staker.pending_rewards,
+        dec_rewards: staker.dec_rewards,
+        last_claimed_block: staker.last_claimed_block,
+        position_weight: staker.position_weight,
+    })
+}
+//query all holders list
+pub fn query_staker_for_all_duration(
+    deps: Deps,
+    _env: Env,
+    address: String,
+) -> StdResult<StakerForAllDurationResponse> {
+    let addr = deps.api.addr_validate(&address)?;
+    //return all stakers of address
+    let positions: Vec<StakerResponse> = STAKERS
+        .prefix(&addr)
+        .range(deps.storage, None, None, Order::Ascending)
+        .map(|item| {
+            let (_key, value) = item.unwrap();
 
-//             StakerResponse {
-//                 staked_amount: value.staked_amount,
-//                 index: value.index,
-//                 bond_time: value.bond_time,
-//                 unbond_duration_as_days: value.unbond_duration_as_days,
-//                 pending_rewards: value.pending_rewards,
-//                 dec_rewards: value.dec_rewards,
-//                 last_claimed: value.last_claimed,
-//                 position_weight: value.position_weight,
-//             }
-//         })
-//         .collect();
+            StakerResponse {
+                staked_amount: value.staked_amount,
+                index: value.index,
+                bond_block: value.bond_time_block,
+                unbond_duration_as_days: value.unbond_duration_as_days,
+                pending_rewards: value.pending_rewards,
+                dec_rewards: value.dec_rewards,
+                last_claimed_block: value.last_claimed_block,
+                position_weight: value.position_weight,
+            }
+        })
+        .collect();
 
-//     Ok(StakerForAllDurationResponse { positions })
-// }
+    Ok(StakerForAllDurationResponse { positions })
+}
 
-// #[cfg(not(feature = "library"))]
-// pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-//     Ok(Response::default())
-// }
+#[cfg(not(feature = "library"))]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
+}

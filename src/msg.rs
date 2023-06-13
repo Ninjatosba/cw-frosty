@@ -71,7 +71,7 @@ pub struct StateResponse {
     pub total_staked: Uint128,
     pub total_weight: Decimal256,
     pub total_reward_claimed: Uint128,
-    pub last_updated: Timestamp,
+    pub last_updated_block: u64,
 }
 
 #[cw_serde]
@@ -81,7 +81,7 @@ pub struct ConfigResponse {
     pub admin: String,
     pub fee_collector: String,
     pub force_claim_ratio: String,
-    pub reward_per_second: Uint128,
+    pub reward_per_block: Uint128,
 }
 
 #[cw_serde]
@@ -104,11 +104,11 @@ pub struct ListClaimsResponse {
 pub struct StakerResponse {
     pub staked_amount: Uint128,
     pub index: Decimal256,
-    pub bond_time: Timestamp,
+    pub bond_block: u64,
     pub unbond_duration_as_days: u128,
     pub pending_rewards: Uint128,
     pub dec_rewards: Decimal256,
-    pub last_claimed: Timestamp,
+    pub last_claimed_block: u64,
     pub position_weight: Decimal256,
 }
 
