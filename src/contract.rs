@@ -137,7 +137,7 @@ pub fn execute_receive(
     let msg = from_slice::<ReceiveMsg>(&wrapper.msg)?;
     let api = deps.api;
     let balance = CW20Balance {
-        denom: info.sender,
+        denom: info.clone().sender,
         amount: wrapper.amount,
         sender: api.addr_validate(&wrapper.sender)?,
     };
@@ -596,10 +596,11 @@ pub fn execute_set_reward_per_second(
     let reward_end_block;
     let total_reward;
     let amount: Uint128;
+    let admin = config.clone().admin;
     // Distribute rewards prior to changing reward per block
     update_reward_index(&mut state, env.block.height, config.clone());
     // match denom and expect that token denom
-    match config.reward_token_denom {
+    match config.clone().reward_token_denom {
         Denom::Cw20(denom) => {
             // If the config denom is cw-20, execute this function with the balance
             if let Some(balance) = balance {
@@ -609,7 +610,7 @@ pub fn execute_set_reward_per_second(
                 if balance.denom != denom {
                     return Err(ContractError::InvalidRewardTokenDenom {});
                 }
-                if balance.sender != config.admin {
+                if balance.sender != admin {
                     return Err(ContractError::Unauthorized {});
                 }
                 amount = balance.amount;
@@ -627,7 +628,7 @@ pub fn execute_set_reward_per_second(
             if (funds.amount).is_zero() {
                 return Err(ContractError::NoFund {});
             }
-            if (info.sender != config.admin) {
+            if (info.sender != admin) {
                 return Err(ContractError::Unauthorized {});
             }
             amount = funds.amount;
@@ -635,6 +636,7 @@ pub fn execute_set_reward_per_second(
     };
     // Calculate how much undistributed reward is left
     let undistributed_reward = config
+        .clone()
         .total_reward
         .checked_sub(state.total_reward_claimed)?;
     total_reward = amount.checked_add(undistributed_reward)?;
