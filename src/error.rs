@@ -1,4 +1,6 @@
-use cosmwasm_std::{OverflowError, StdError, Uint128};
+use std::convert::Infallible;
+
+use cosmwasm_std::{CheckedFromRatioError, DivideByZeroError, OverflowError, StdError, Uint128};
 use cw_asset::AssetError;
 use cw_utils::PaymentError;
 
@@ -68,10 +70,27 @@ pub enum ContractError {
 
     #[error("Invalid reward token denom")]
     InvalidRewardTokenDenom {},
+
+    #[error("Can not divide by zero")]
+    DivideByZero {},
+
+    #[error("Overflow error")]
+    OverflowError {},
 }
 
 impl From<AssetError> for ContractError {
     fn from(_err: AssetError) -> Self {
         ContractError::AssetError {}
+    }
+}
+impl From<CheckedFromRatioError> for ContractError {
+    fn from(_err: CheckedFromRatioError) -> Self {
+        ContractError::DivideByZero {}
+    }
+}
+
+impl From<Infallible> for ContractError {
+    fn from(_err: Infallible) -> Self {
+        ContractError::OverflowError {}
     }
 }

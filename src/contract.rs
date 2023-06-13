@@ -253,24 +253,22 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
 
 pub fn update_reward_index(
     state: &mut State,
-    now: Timestamp,
+    mut now_block: u64,
     config: Config,
 ) -> Result<(), ContractError> {
-    // new distribution balance = (now - last_updated) * reward_per_second
-    let seconds_since_last_updated =
-        Uint128::from(now.seconds().saturating_sub(state.last_updated.seconds()));
-    let new_dist_balance = seconds_since_last_updated.checked_mul(config.reward_per_second)?;
-
-    let divider = state.total_weight;
-    // adding index = new distribution balance / total weight
-    let adding_index = Decimal256::from_ratio(new_dist_balance, Uint256::one())
-        .checked_div(divider)
-        .unwrap_or(Decimal256::zero());
-    if !state.total_weight.is_zero() {
-        state.total_reward_claimed = state.total_reward_claimed.checked_add(new_dist_balance)?;
-        state.global_index = state.global_index.add(adding_index);
+    // Check if current block is greater reward end block if yes then we should update the index as if now is end block
+    if now_block > config.reward_end_block {
+        now_block = config.reward_end_block;
     }
-    state.last_updated = now;
+    // new distribution balance = (now - last_updated) * reward_per_block
+    let blocks_passed = now_block.checked_sub(state.last_updated_block)?;
+    let new_distribution_balance = Uint128::from(blocks_passed) * config.reward_per_block;
+
+    // new index = old_index + new_distribution_balance / total_weight
+    let incrementer = Decimal256::from_ratio(new_distribution_balance, Uint128::one())
+        .checked_div(state.total_weight)?;
+    state.global_index = state.global_index + incrementer;
+    state.last_updated_block = now_block;
     Ok(())
 }
 
