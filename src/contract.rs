@@ -15,8 +15,8 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS,
-    STATE,
+    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, Status, CLAIMS_KEY, CONFIG,
+    STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -76,6 +76,8 @@ pub fn instantiate(
         total_weight: Decimal256::zero(),
         total_reward_claimed: Uint128::zero(),
         last_updated_block: env.block.height,
+        // Status is set pending until reward is funded
+        status: Status::Pending,
     };
     STATE.save(deps.storage, &state)?;
     let res = Response::default()
@@ -125,7 +127,7 @@ pub fn execute(
     }
 }
 
-// /// Increase global_index according to claimed rewards amount
+// Increase global_index according to claimed rewards amount
 pub fn execute_receive(
     deps: DepsMut,
     env: Env,
@@ -207,7 +209,7 @@ pub fn execute_bond(
             let staker = StakePosition {
                 staked_amount: amount,
                 index: state.global_index,
-                bond_time: env.block.time,
+                bond_time_block: env.block.height,
                 unbond_duration_as_days: duration,
                 pending_rewards: Uint128::zero(),
                 dec_rewards: Decimal256::zero(),

@@ -4,6 +4,12 @@ use cosmwasm_schema::cw_serde;
 use cw_storage_plus::{Bound, Item, Map};
 
 use crate::ContractError;
+#[cw_serde]
+pub enum Status {
+    Pending,
+    Distribution,
+    Ended,
+}
 
 #[cw_serde]
 pub struct State {
@@ -12,6 +18,7 @@ pub struct State {
     pub total_weight: Decimal256,
     pub total_reward_claimed: Uint128,
     pub last_updated_block: u64,
+    pub status: Status,
 }
 
 #[cw_serde]
