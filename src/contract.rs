@@ -390,6 +390,7 @@ pub fn execute_receive_reward(
             reward
         })
         .sum();
+    println!("rewards: {}", rewards);
     STATE.save(deps.storage, &state)?;
     let reward_asset = match config.reward_token_denom {
         Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),

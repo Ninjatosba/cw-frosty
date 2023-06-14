@@ -216,7 +216,7 @@ mod tests {
         // still zero because no reward per second
         assert_eq!(res.attributes[2].value, "0".to_string());
 
-        // set reward per second
+        // set reward per block
         let env = mock_env();
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::SetRewardPerBlock {
@@ -266,7 +266,7 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let env = mock_env();
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::SetRewardPerBlock {
@@ -379,7 +379,7 @@ mod tests {
             msg: to_binary(&ReceiveMsg::Bond { duration_day: 36 }).unwrap(),
         });
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // set reward per second
+        // set reward per block
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::SetRewardPerBlock {
             reward_per_block: Uint128::new(100),
@@ -436,7 +436,7 @@ mod tests {
         //distrubuted in 100_000 seconds
         let info = mock_info("creator", &[]);
         let env = mock_env();
-        // set reward per second
+        // set reward per block
         let msg = ExecuteMsg::SetRewardPerBlock {
             reward_per_block: Uint128::new(100),
         };
@@ -512,15 +512,22 @@ mod tests {
         //init
         let mut deps = mock_dependencies_with_balance(&[]);
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1000;
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-        // set reward per second
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
+        // set reward per block
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 1002;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(1),
+            })
+            .unwrap(),
+        });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // unbond without bond
@@ -535,7 +542,8 @@ mod tests {
 
         // bond
         let info = mock_info("stake_token_address", &[]);
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1003;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -575,13 +583,14 @@ mod tests {
         // unbond
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
+        env.block.height = 2000;
         env.block.time = env.block.time.plus_seconds(1000);
         let msg = ExecuteMsg::UnbondStake {
             amount: Some(Uint128::new(100)),
             duration_as_days: 16,
         };
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // at unbond rewards are recieved
+        // at unbond, rewards are recieved
         assert_eq!(
             res.messages[0].msg,
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -589,7 +598,7 @@ mod tests {
                 funds: vec![],
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "staker1".to_string(),
-                    amount: Uint128::new(1000000),
+                    amount: Uint128::new(99),
                 })
                 .unwrap(),
             })
@@ -645,7 +654,7 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let info = mock_info("reward_token_address", &[]);
         let mut env = mock_env();
         env.block.height = 1002;
@@ -748,7 +757,7 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let info = mock_info("reward_token_address", &[]);
         let mut env = mock_env();
         env.block.height = 1002;
@@ -902,7 +911,7 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let info = mock_info("reward_token_address", &[]);
         let mut env = mock_env();
         env.block.height = 1002;
@@ -1027,7 +1036,7 @@ mod tests {
         env.block.height = 1000;
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let info = mock_info("reward_token_address", &[]);
         let mut env = mock_env();
         env.block.height = 1002;
@@ -1129,7 +1138,7 @@ mod tests {
         let info = mock_info("creator", &[]);
         instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
 
-        // set reward per second
+        // set reward per block
         let info = mock_info("creator", &[]);
         let env = mock_env();
         let msg = ExecuteMsg::SetRewardPerBlock {
