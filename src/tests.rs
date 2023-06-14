@@ -6,7 +6,7 @@ mod tests {
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
     use cosmwasm_std::{
-        coin, from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256,
+        coin, from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, Env,
         MessageInfo, Response, StdError, Timestamp, Uint128, WasmMsg,
     };
     use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -234,7 +234,6 @@ mod tests {
         // query  state
 
         let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
-        println!("{:?}", res);
         assert_eq!(
             res.global_index,
             Decimal256::from_str("31.622776601683793329").unwrap()
@@ -424,27 +423,32 @@ mod tests {
     }
 
     #[test]
-    pub fn test_recieve_rewards() {
+    pub fn test_receive_rewards() {
         //init
         let mut deps = mock_dependencies_with_balance(&[]);
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1000;
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
-        //fund rewards
-        //reward amount 100_000_000
-        //distrubuted in 100_000 seconds
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
         // set reward per block
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 1000;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(1),
+            })
+            .unwrap(),
+        });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         //bond
         let info = mock_info("stake_token_address", &[]);
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1000;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -452,13 +456,14 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // staker 1 recieve rewards at 1000 seconds all rewards should be 100_000_000/100=1_000_000
+        // Staker 1 receive rewards at 2000 blocks
+        // Total rewards should be 1*2000-1000 = 1000
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 2000;
         let msg = ExecuteMsg::ReceiveReward {};
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
-        assert_eq!(res.attributes[2].value, "1000000".to_string());
+        assert_eq!(res.attributes[2].value, "1000".to_string());
         assert_eq!(
             res.messages[0].msg,
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -466,16 +471,16 @@ mod tests {
                 funds: vec![],
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "staker1".to_string(),
-                    amount: Uint128::new(1_000_000),
+                    amount: Uint128::new(1000),
                 })
                 .unwrap(),
             })
         );
 
-        // staker 1 bond with diffirent duration at 2000 seconds
+        // staker 1 bond with diffirent duration at 2500th blocks
         let info = mock_info("stake_token_address", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(2000);
+        env.block.height = 2500;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -483,16 +488,16 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // staker 1 recieve rewards at 3000 seconds all rewards should be 3_000_000
-        // for duration 16 it should be 2000000+400(but recieved 1000000+400)
-        // for duration 36 it should be 600
-        // total 2000000
+        // staker 1 recieve rewards at 3000 blocks all rewards should be 2000
+        // staker 1 already received 1000 rewards
+        // so total rewards should be 2000-1000 = 1000
+        // This test looks unnecessary but acctually calculation has been made for 2 different durations and sum is correct as expected
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(3000);
+        env.block.height = 3000;
         let msg = ExecuteMsg::ReceiveReward {};
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
-        assert_eq!(res.attributes[2].value, "2000000".to_string());
+        assert_eq!(res.attributes[2].value, "1000".to_string());
         assert_eq!(
             res.messages[0].msg,
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -500,7 +505,7 @@ mod tests {
                 funds: vec![],
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "staker1".to_string(),
-                    amount: Uint128::new(2_000_000),
+                    amount: Uint128::new(1000),
                 })
                 .unwrap(),
             })
