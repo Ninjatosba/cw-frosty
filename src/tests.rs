@@ -183,7 +183,8 @@ mod tests {
         // instantiate
         let mut deps = mock_dependencies();
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 10;
         instantiate(
             deps.as_mut(),
             env.clone(),
@@ -211,34 +212,39 @@ mod tests {
         let info = mock_info("creator", &[]);
         let msg = ExecuteMsg::UpdateRewardIndex {};
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(100);
+        env.block.height = 10;
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         // still zero because no reward per second
         assert_eq!(res.attributes[2].value, "0".to_string());
 
         // set reward per block
-        let env = mock_env();
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        // update reward index after reward per second is set
+        let info = mock_info("reward_token_address", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(100);
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::UpdateRewardIndex {};
+        env.block.height = 20;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(1),
+            })
+            .unwrap(),
+        });
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        // query  state
+        // update reward index after reward per block set
+        let mut env = mock_env();
+        env.block.height = 120;
+        let info = mock_info("creator", &[]);
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
+        // query  state
         let res = query_state(deps.as_ref(), env, QueryMsg::State {}).unwrap();
         assert_eq!(
             res.global_index,
-            Decimal256::from_str("31.622776601683793329").unwrap()
+            Decimal256::from_str("0.316227766016837933").unwrap()
         );
-        assert_eq!(res.total_reward_claimed, Uint128::new(10000));
+        assert_eq!(res.total_reward_claimed, Uint128::new(100));
     }
 
     #[test]
@@ -491,7 +497,7 @@ mod tests {
         // staker 1 recieve rewards at 3000 blocks all rewards should be 2000
         // staker 1 already received 1000 rewards
         // so total rewards should be 2000-1000 = 1000
-        // This test looks unnecessary but acctually calculation has been made for 2 different durations and sum is correct as expected
+        // This test looks unnecessary but actually calculation has been made for 2 different durations and sum is correct as expected
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
         env.block.height = 3000;
