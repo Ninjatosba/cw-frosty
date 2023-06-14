@@ -629,13 +629,15 @@ mod tests {
         // init
         let mut deps = mock_dependencies_with_balance(&[]);
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1000;
         let info = mock_info("creator", &[]);
         instantiate(deps.as_mut(), env, info, init_msg).unwrap();
 
         // bond
         let info = mock_info("stake_token_address", &[]);
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1001;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -644,11 +646,17 @@ mod tests {
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // set reward per second
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 1002;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(1),
+            })
+            .unwrap(),
+        });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // try claiming before unbond
