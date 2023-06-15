@@ -1162,7 +1162,7 @@ mod tests {
         // bond
         let info = mock_info("stake_token_address", &[]);
         let mut env = mock_env();
-        env.block.height = 3000;
+        env.block.height = 2100;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -1173,7 +1173,7 @@ mod tests {
         // 100 blocks passed and staker 1 receive rewards = reward amount 100*1000=100_000
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.height = 3100;
+        env.block.height = 2200;
         let msg = ExecuteMsg::ReceiveReward {};
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
@@ -1183,11 +1183,10 @@ mod tests {
                 amount: vec![coin(100_000, "reward_token_native")],
             })
         );
-
         // 100 blocks passed and staker 1 unbonds = reward amount 100*1000=100_000
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.height = 3200;
+        env.block.height = 2300;
         let msg = ExecuteMsg::UnbondStake {
             amount: None,
             duration_as_days: 16,

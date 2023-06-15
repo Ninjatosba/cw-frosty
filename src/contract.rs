@@ -395,7 +395,6 @@ pub fn execute_receive_reward(
         Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),
         Denom::Native(denom) => Asset::native(denom, rewards),
     };
-
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
     if rewards > Uint128::zero() {
         messages.push(reward_msg);
