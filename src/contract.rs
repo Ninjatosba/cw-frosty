@@ -261,7 +261,6 @@ pub fn update_reward_index(
     // Check if current block is greater reward end block if yes then we should update the index as if now is end block(Distributing last rewards)
     // Also change status to ended
     // Status can only be changed to ended here
-
     if now_block > config.reward_end_block {
         now_block = config.reward_end_block;
         state.status = Status::Ended;
@@ -390,15 +389,19 @@ pub fn execute_receive_reward(
             reward
         })
         .sum();
-    println!("rewards: {}", rewards);
     STATE.save(deps.storage, &state)?;
+    let mut messages: Vec<CosmosMsg> = vec![];
     let reward_asset = match config.reward_token_denom {
         Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),
         Denom::Native(denom) => Asset::native(denom, rewards),
     };
+
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
+    if rewards > Uint128::zero() {
+        messages.push(reward_msg);
+    }
     let res = Response::new()
-        .add_message(reward_msg)
+        .add_messages(messages)
         .add_attribute("action", "receive_reward")
         .add_attribute("address", info.sender)
         .add_attribute("rewards", rewards.to_string());

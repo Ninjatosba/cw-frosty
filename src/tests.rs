@@ -1145,13 +1145,15 @@ mod tests {
             fee_collector: "fee_collector".to_string(),
             max_bond_duration: 100,
         };
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 1000;
         let info = mock_info("creator", &[]);
         instantiate(deps.as_mut(), env.clone(), info, init_msg).unwrap();
 
         // set reward per block
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
+        let info = mock_info("creator", &[coin(1_000_000, "reward_token_native")]);
+        let mut env = mock_env();
+        env.block.height = 2000;
         let msg = ExecuteMsg::SetRewardPerBlock {
             reward_per_block: Uint128::new(1000),
         };
@@ -1159,7 +1161,8 @@ mod tests {
 
         // bond
         let info = mock_info("stake_token_address", &[]);
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 3000;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -1167,24 +1170,24 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        // 100 second passed and staker 1 receives rewards = reward amount 100*1000=100000
+        // 100 blocks passed and staker 1 receive rewards = reward amount 100*1000=100_000
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(100);
+        env.block.height = 3100;
         let msg = ExecuteMsg::ReceiveReward {};
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.messages[0].msg,
             CosmosMsg::Bank(BankMsg::Send {
                 to_address: "staker1".to_string(),
-                amount: vec![coin(100000, "reward_token_native")],
+                amount: vec![coin(100_000, "reward_token_native")],
             })
         );
 
-        // 1000 second passed and staker 1 unbonds = reward amount 900*1000=900 000
+        // 100 blocks passed and staker 1 unbonds = reward amount 100*1000=100_000
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 3200;
         let msg = ExecuteMsg::UnbondStake {
             amount: None,
             duration_as_days: 16,
@@ -1194,7 +1197,7 @@ mod tests {
             res.messages[0].msg,
             CosmosMsg::Bank(BankMsg::Send {
                 to_address: "staker1".to_string(),
-                amount: vec![coin(900000, "reward_token_native")],
+                amount: vec![coin(100_000, "reward_token_native")],
             })
         );
     }
