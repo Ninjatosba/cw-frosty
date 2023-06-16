@@ -252,7 +252,8 @@ mod tests {
         // instantiate
         let mut deps = mock_dependencies();
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 100;
         instantiate(deps.as_mut(), env, mock_info("creator", &[]), init_msg).unwrap();
 
         // update staker rewards with no bond
@@ -262,7 +263,8 @@ mod tests {
         assert_eq!(res, ContractError::NoBond {});
 
         // bond
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 200;
         let info = mock_info("stake_token_address", &[]);
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
@@ -272,18 +274,24 @@ mod tests {
         let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // set reward per block
-        let env = mock_env();
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
-        execute(deps.as_mut(), env, info, msg).unwrap();
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 300;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(1),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // update staker rewards
         let info = mock_info("staker1", &[]);
         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 400;
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         // query  staker
         let res = query_staker_for_duration(env.clone(), deps.as_ref(), "staker1".to_string(), 10)
@@ -300,9 +308,9 @@ mod tests {
 
         // update one staker with multiple durations
         // second bond
-        //first 1000000 is for first bond
+        // first 1000000 is for first bond
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 500;
         let info = mock_info("stake_token_address", &[]);
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
@@ -315,17 +323,17 @@ mod tests {
         let info = mock_info("staker1", &[]);
         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(2000);
+        env.block.height = 600;
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         let _rewards = res.attributes[2].value.parse::<u128>().unwrap();
 
-        // query  staker for all durations
+        // query state
         let _res = query_state(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
 
+        // query  staker for all durations
         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
             .unwrap();
 
-        // query state
         // checking if the reward distrubuted is same as pending rewards of staker
         let reward_to_staker1 = res.positions[0].pending_rewards + res.positions[1].pending_rewards;
         let rounded_reward = Uint128::from_str(
@@ -349,7 +357,8 @@ mod tests {
         //init
         let mut deps = mock_dependencies_with_balance(&[]);
         let init_msg = default_init();
-        let env = mock_env();
+        let mut env = mock_env();
+        env.block.height = 100;
         instantiate(
             deps.as_mut(),
             env.clone(),
@@ -360,6 +369,8 @@ mod tests {
 
         //first bond
         let info = mock_info("stake_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 200;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker1".to_string(),
             amount: Uint128::new(100),
@@ -369,6 +380,8 @@ mod tests {
 
         //second bond
         let info = mock_info("stake_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 300;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker2".to_string(),
             amount: Uint128::new(100),
@@ -378,6 +391,8 @@ mod tests {
 
         //third bond
         let info = mock_info("stake_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 400;
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "staker3".to_string(),
             amount: Uint128::new(100),
@@ -385,27 +400,34 @@ mod tests {
         });
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         // set reward per block
-        let info = mock_info("creator", &[]);
-        let msg = ExecuteMsg::SetRewardPerBlock {
-            reward_per_block: Uint128::new(100),
-        };
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 500;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(100_000_000),
+            msg: to_binary(&ExecuteMsg::SetRewardPerBlock {
+                reward_per_block: Uint128::new(100),
+            })
+            .unwrap(),
+        });
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        // update staker rewards at 1000 seconds all reweards should be 100_000_000/100=1_000_000
+        // update staker rewards at 1000 blocks, total rewards are (1000-500)*100=50000
         // staker1 amount 100 -- duration 16 -- weight 100*4=400
         // staker2 amount 100 -- duration 25 -- weight 100*5=500
         // staker3 amount 100 -- duration 36 -- weight 100*6=600
         // total weight 1500
-        // staker1 reward 400/1500*1_000_000= 266_666
-        // staker2 reward 500/1500*1_000_000= 333_333
-        // staker3 reward 600/1500*1_000_000= 400_000
+        // staker1 rewards 400/1500*50000=13333
+        // staker2 rewards 500/1500*50000=16666
+        // staker3 rewards 600/1500*50000=20000
 
+        // update staker 1
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
-        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 1000;
         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
         let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
-
         // update staker 2
         let info = mock_info("staker2", &[]);
         let msg = ExecuteMsg::UpdateStakerRewards { address: None };
@@ -418,14 +440,14 @@ mod tests {
         // query staker 1
         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker1".to_string())
             .unwrap();
-        assert_eq!(res.positions[0].pending_rewards, Uint128::new(266_666));
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(133_33));
         // query staker 2
         let res = query_staker_for_all_duration(deps.as_ref(), env.clone(), "staker2".to_string())
             .unwrap();
-        assert_eq!(res.positions[0].pending_rewards, Uint128::new(333_333));
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(166_66));
         // query staker 3
         let res = query_staker_for_all_duration(deps.as_ref(), env, "staker3".to_string()).unwrap();
-        assert_eq!(res.positions[0].pending_rewards, Uint128::new(399_999));
+        assert_eq!(res.positions[0].pending_rewards, Uint128::new(19999));
     }
 
     #[test]
