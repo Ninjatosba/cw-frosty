@@ -7,9 +7,8 @@ use cw0::maybe_addr;
 
 use cw20::{Balance, Cw20ReceiveMsg};
 use cw_asset::Asset;
-use serde::de::value::Error;
 
-use crate::helper::{days_to_seconds, get_decimals};
+use crate::helper::{calculate_weight, days_to_seconds, get_decimals};
 use crate::msg::{
     ClaimResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, ListClaimsResponse, MigrateMsg,
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
@@ -178,35 +177,25 @@ pub fn execute_bond(
     match staker {
         Some(mut staker) => {
             update_staker_rewards(&mut state, env.block.height, &mut staker, cfg)?;
-            // add to existing staker
+            let old_weight = staker.position_weight;
+            // add amount to staked amount
             staker.staked_amount = staker.staked_amount.add(amount);
             // update total weight. Its a bit tricky to update total weight so I removed the old weight and add new weight.
-            let _new_weight = Decimal256::from_ratio(duration, Uint128::one())
-                .sqrt()
-                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
+            let new_weight = calculate_weight(staker.staked_amount, duration)?;
+
             state.total_weight = state
                 .total_weight
-                .checked_sub(staker.position_weight)?
-                .checked_add(
-                    Decimal256::from_ratio(duration, Uint128::one())
-                        .sqrt()
-                        .checked_mul(Decimal256::from_ratio(
-                            staker.staked_amount,
-                            Uint128::one(),
-                        ))?,
-                )?;
-            staker.position_weight = Decimal256::from_ratio(duration, Uint128::one())
-                .sqrt()
-                .checked_mul(Decimal256::from_ratio(staker.staked_amount, Uint128::one()))?;
+                .checked_sub(old_weight)?
+                .checked_add(new_weight)?;
 
+            staker.position_weight = new_weight;
             STAKERS.save(deps.storage, (&balance.sender, duration), &staker)?;
         }
         None => {
             // create new staker
             update_reward_index(&mut state, env.block.height, cfg)?;
-            let position_weight = Decimal256::from_ratio(duration, Uint128::one())
-                .sqrt()
-                .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
+
+            let position_weight = calculate_weight(amount, duration)?;
 
             let staker = StakePosition {
                 staked_amount: amount,

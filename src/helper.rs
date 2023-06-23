@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use cosmwasm_std::{Decimal256, StdError, StdResult};
+use cosmwasm_std::{Decimal256, StdError, StdResult, Uint128};
 
 pub fn days_to_seconds(days: u128) -> u64 {
     (days * 24 * 60 * 60) as u64
@@ -18,4 +18,10 @@ pub fn get_decimals(value: Decimal256) -> StdResult<Decimal256> {
         }
         _ => Err(StdError::generic_err("Unexpected number of dots")),
     }
+}
+pub fn calculate_weight(amount: Uint128, duration: u128) -> StdResult<Decimal256> {
+    let new_weight = Decimal256::from_ratio(duration, Uint128::one())
+        .sqrt()
+        .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
+    Ok(new_weight)
 }
