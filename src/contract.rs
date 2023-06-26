@@ -176,7 +176,10 @@ pub fn execute_bond(
 
     match staker {
         Some(mut staker) => {
-            update_staker_rewards(&mut state, env.block.height, &mut staker, cfg)?;
+            //update reward index
+            update_reward_index(&mut state, env.block.height, cfg)?;
+            // update staker rewards
+            update_staker_rewards(env.block.height, &mut staker, state.global_index)?;
             let old_weight = staker.position_weight;
             // add amount to staked amount
             staker.staked_amount = staker.staked_amount.add(amount);
@@ -247,7 +250,7 @@ pub fn update_reward_index(
     mut now_block: u64,
     config: Config,
 ) -> Result<(), ContractError> {
-    // Check if current block is greater reward end block if yes then we should update the index as if now is end block(Distributing last rewards)
+    // Check if current block is greater reward end block if yes then we should update the index as if now is the end block(Distributing last rewards)
     // Also change status to ended
     // Status can only be changed to ended here
     if now_block > config.reward_end_block {
@@ -259,9 +262,6 @@ pub fn update_reward_index(
         .checked_sub(state.last_updated_block)
         .ok_or(ContractError::OverflowError {})?;
     let new_distribution_balance = Uint128::from(blocks_passed) * config.reward_per_block;
-    // If there is any balance to distribute and status is Pending then this means this is the first update after reward start
-    // Change the status to Active
-    // Status can only be changed to Active here
     // new index = old_index + new_distribution_balance / total_weight
     let incrementer = Decimal256::from_ratio(new_distribution_balance, Uint128::one())
         .checked_div(state.total_weight)
@@ -289,6 +289,8 @@ pub fn execute_update_staker_rewards(
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
     }
+    // update global index
+    update_reward_index(&mut state, env.block.height, config.clone())?;
     // stakers rewards are updated for every duration and current rewards summed to return response
     let rewards: Uint128 = STAKERS
         .range(deps.storage, None, None, Order::Ascending)
@@ -296,9 +298,8 @@ pub fn execute_update_staker_rewards(
         .into_iter()
         .filter(|(staker, _)| staker.0 == addr)
         .map(|(_, mut staker)| {
-            let reward =
-                update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())
-                    .unwrap_or(Uint128::zero());
+            let reward = update_staker_rewards(env.block.height, &mut staker, state.global_index)
+                .unwrap_or(Uint128::zero());
             STAKERS
                 .save(
                     deps.storage,
@@ -319,31 +320,26 @@ pub fn execute_update_staker_rewards(
 }
 
 pub fn update_staker_rewards(
-    state: &mut State,
     now_block: u64,
     stake_position: &mut StakePosition,
-    config: Config,
+    global_index: Decimal256,
 ) -> Result<Uint128, ContractError> {
-    //update reward index
-    update_reward_index(state, now_block, config)?;
-
-    let index_diff = state.global_index - stake_position.index;
+    let index_diff = global_index - stake_position.index;
     // new distributed reward = index diff * position weight + dec rewards
     let new_distributed_reward = index_diff
         .checked_mul(stake_position.position_weight)?
         .checked_add(stake_position.dec_rewards)?;
     // decimals are used to store the remainder of the division
     let decimals = get_decimals(new_distributed_reward)?;
+    // floor new distributed reward
 
-    let rewards_uint128 = (new_distributed_reward * Uint256::one())
-        .try_into()
-        .unwrap_or(Uint128::zero());
+    let rewards_uint128 = (new_distributed_reward * Uint256::one()).try_into()?;
     stake_position.dec_rewards = decimals;
     stake_position.pending_rewards = stake_position
         .pending_rewards
         .checked_add(rewards_uint128)?;
     // update stakers index
-    stake_position.index = state.global_index;
+    stake_position.index = global_index;
     // update last claimed time. This is used to return data for the reward calculation
     stake_position.last_claimed_block = now_block;
     Ok(stake_position.pending_rewards)
@@ -363,9 +359,8 @@ pub fn execute_receive_reward(
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
         .map(|(_, mut staker)| {
-            let reward =
-                update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())
-                    .unwrap();
+            let reward = update_staker_rewards(env.block.height, &mut staker, state.global_index)
+                .unwrap_or(Uint128::zero());
             // set pending rewards to zero.
             staker.pending_rewards = Uint128::zero();
             STAKERS

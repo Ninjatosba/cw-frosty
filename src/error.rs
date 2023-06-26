@@ -1,6 +1,9 @@
 use std::convert::Infallible;
 
-use cosmwasm_std::{CheckedFromRatioError, DivideByZeroError, OverflowError, StdError, Uint128};
+use cosmwasm_std::{
+    CheckedFromRatioError, ConversionOverflowError, DivideByZeroError, OverflowError, StdError,
+    Uint128,
+};
 use cw_asset::AssetError;
 use cw_utils::PaymentError;
 
@@ -76,8 +79,6 @@ pub enum ContractError {
 
     #[error("Overflow error")]
     OverflowError {},
-
-    
 }
 
 impl From<AssetError> for ContractError {
@@ -93,6 +94,11 @@ impl From<CheckedFromRatioError> for ContractError {
 
 impl From<Infallible> for ContractError {
     fn from(_err: Infallible) -> Self {
+        ContractError::OverflowError {}
+    }
+}
+impl From<ConversionOverflowError> for ContractError {
+    fn from(_err: ConversionOverflowError) -> Self {
         ContractError::OverflowError {}
     }
 }
