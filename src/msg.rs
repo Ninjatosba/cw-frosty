@@ -45,6 +45,9 @@ pub enum ExecuteMsg {
         fee_collector: Option<String>,
         force_claim_ratio: Option<Decimal>,
     },
+    AdminWithdraw {
+        withdraw_address: Option<String>,
+    },
 }
 
 #[cw_serde]

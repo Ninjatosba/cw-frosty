@@ -124,6 +124,9 @@ pub fn execute(
         ExecuteMsg::SetRewardPerBlock { reward_per_block } => {
             execute_set_reward_per_second(deps, env, info, reward_per_block, None)
         }
+        ExecuteMsg::AdminWithdraw { withdraw_address } => {
+            execute_admin_withdraw(deps, env, info, withdraw_address)
+        }
     }
 }
 
@@ -674,8 +677,7 @@ pub fn execute_set_reward_per_second(
     config.reward_per_block = reward_per_block;
     config.reward_end_block = reward_end_block;
     config.total_reward = total_reward;
-    // TODO: check if this is needed
-    state.last_updated_block = env.block.height;
+    // Set status to distribution if it is pending or ended. This can only be changed to distribution here
     if state.status == Status::Pending || state.status == Status::Ended {
         state.status = Status::Distribution;
     }
@@ -684,6 +686,36 @@ pub fn execute_set_reward_per_second(
     Ok(Response::default()
         .add_attribute("action", "set_reward_per_second".to_string())
         .add_attribute("reward_per_second", reward_per_block.to_string()))
+}
+
+pub fn execute_admin_withdraw(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    withdraw_address: Option<String>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
+    if info.sender != config.admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    let withdraw_address = maybe_addr(deps.api, withdraw_address)?.unwrap_or(info.sender);
+
+    let unclaimed_reward = config
+        .total_reward
+        .checked_sub(state.total_reward_claimed)?;
+
+    let reward_asset = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, unclaimed_reward),
+        Denom::Native(denom) => Asset::native(denom, unclaimed_reward),
+    };
+    let reward_msg = reward_asset.transfer_msg(withdraw_address)?;
+
+    let res = Response::new()
+        .add_message(reward_msg)
+        .add_attribute("action", "admin_withdraw")
+        .add_attribute("amount", unclaimed_reward.to_string());
+    Ok(res)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

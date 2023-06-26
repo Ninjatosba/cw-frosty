@@ -2,6 +2,8 @@ use std::str::FromStr;
 
 use cosmwasm_std::{Addr, Decimal256, StdError, StdResult, Uint128};
 
+use crate::state::Denom;
+
 pub fn days_to_seconds(days: u128) -> u64 {
     (days * 24 * 60 * 60) as u64
 }
@@ -25,5 +27,3 @@ pub fn calculate_weight(amount: Uint128, duration: u128) -> StdResult<Decimal256
         .checked_mul(Decimal256::from_ratio(amount, Uint128::one()))?;
     Ok(new_weight)
 }
-
-
