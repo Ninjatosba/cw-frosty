@@ -5,7 +5,7 @@ use cosmwasm_std::{
 use cosmwasm_std::{from_slice, CosmosMsg};
 use cw0::maybe_addr;
 
-use cw20::{Balance, Cw20ReceiveMsg};
+use cw20::Cw20ReceiveMsg;
 use cw_asset::Asset;
 
 use crate::helper::{calculate_weight, days_to_seconds, get_decimals};
@@ -164,6 +164,10 @@ pub fn execute_bond(
     if duration < 1 || duration > cfg.max_bond_duration {
         return Err(ContractError::InvalidBondDuration {});
     }
+    // check status
+    if STATE.load(deps.storage)?.status == Status::Ended {
+        return Err(ContractError::NotDistribution {});
+    }
 
     let amount = balance.amount;
 
@@ -230,6 +234,10 @@ pub fn execute_bond(
 pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
+    // Check Status
+    if state.status == Status::Ended || state.status == Status::Pending {
+        return Err(ContractError::NotDistribution {});
+    }
 
     update_reward_index(&mut state, env.block.height, config)?;
 
@@ -285,6 +293,10 @@ pub fn execute_update_staker_rewards(
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     let addr = maybe_addr(deps.api, address)?.unwrap_or_else(|| info.sender.clone());
+    // Check Status
+    if state.status == Status::Ended || state.status == Status::Pending {
+        return Err(ContractError::NotDistribution {});
+    }
     // Zero staking check
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
@@ -353,23 +365,32 @@ pub fn execute_receive_reward(
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
 
+    // update global index
+    update_reward_index(&mut state, env.block.height, config.clone())?;
+
     let rewards: Uint128 = STAKERS
         .prefix(&info.sender)
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
         .map(|(_, mut staker)| {
-            let reward = update_staker_rewards(env.block.height, &mut staker, state.global_index)
-                .unwrap_or(Uint128::zero());
-            // set pending rewards to zero.
-            staker.pending_rewards = Uint128::zero();
-            STAKERS
-                .save(
-                    deps.storage,
-                    (&info.sender, staker.unbond_duration_as_days),
-                    &staker,
-                )
-                .unwrap_or_default();
+            let reward =
+                match update_staker_rewards(env.block.height, &mut staker, state.global_index) {
+                    Ok(reward) => {
+                        staker.pending_rewards = Uint128::zero();
+                        STAKERS
+                            .save(
+                                deps.storage,
+                                (&info.sender, staker.unbond_duration_as_days),
+                                &staker,
+                            )
+                            .unwrap_or_default();
+                        reward
+                    }
+                    Err(err) => {
+                        return Uint128::zero();
+                    }
+                };
             reward
         })
         .sum();
@@ -403,7 +424,9 @@ pub fn execute_unbond(
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration_as_days))?;
     // rewards for desired duration is updated and pending rewards are set to zero
-    let reward = update_staker_rewards(&mut state, env.block.height, &mut staker, config.clone())?;
+    // update global index
+    update_reward_index(&mut state, env.block.height, config.clone())?;
+    let reward = update_staker_rewards(env.block.height, &mut staker, state.global_index)?;
     staker.pending_rewards = Uint128::zero();
 
     let unbond_amount = match amount {

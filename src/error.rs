@@ -79,6 +79,9 @@ pub enum ContractError {
 
     #[error("Overflow error")]
     OverflowError {},
+
+    #[error("Status is not distribution")]
+    NotDistribution {},
 }
 
 impl From<AssetError> for ContractError {
