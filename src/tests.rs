@@ -1155,6 +1155,17 @@ mod tests {
         );
     }
     #[test]
+    #[test]
+    pub fn test_status() {
+        // init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let mut env = mock_env();
+        env.block.height = 1000;
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), env, info, init_msg).unwrap();
+    }
+
     pub fn test_native() {
         // init
         let mut deps = mock_dependencies_with_balance(&[]);

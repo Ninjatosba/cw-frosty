@@ -14,8 +14,8 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, Status, CLAIMS_KEY, CONFIG,
-    STAKERS, STATE,
+    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS,
+    STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -76,8 +76,6 @@ pub fn instantiate(
         total_weight: Decimal256::zero(),
         total_reward_claimed: Uint128::zero(),
         last_updated_block: env.block.height,
-        // Status is set pending until reward is funded
-        status: Status::Pending,
     };
     STATE.save(deps.storage, &state)?;
     let res = Response::default()
@@ -167,10 +165,6 @@ pub fn execute_bond(
     if duration < 1 || duration > cfg.max_bond_duration {
         return Err(ContractError::InvalidBondDuration {});
     }
-    // check status
-    if STATE.load(deps.storage)?.status == Status::Ended {
-        return Err(ContractError::NotDistribution {});
-    }
 
     let amount = balance.amount;
 
@@ -238,9 +232,6 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     // Check Status
-    if state.status == Status::Ended || state.status == Status::Pending {
-        return Err(ContractError::NotDistribution {});
-    }
 
     update_reward_index(&mut state, env.block.height, config)?;
 
@@ -262,11 +253,8 @@ pub fn update_reward_index(
     config: Config,
 ) -> Result<(), ContractError> {
     // Check if current block is greater reward end block if yes then we should update the index as if now is the end block(Distributing last rewards)
-    // Also change status to ended
-    // Status can only be changed to ended here
     if now_block > config.reward_end_block {
         now_block = config.reward_end_block;
-        state.status = Status::Ended;
     }
     // new distribution balance = (now - last_updated) * reward_per_block
     let blocks_passed = now_block
@@ -296,10 +284,6 @@ pub fn execute_update_staker_rewards(
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     let addr = maybe_addr(deps.api, address)?.unwrap_or_else(|| info.sender.clone());
-    // Check Status
-    if state.status == Status::Ended || state.status == Status::Pending {
-        return Err(ContractError::NotDistribution {});
-    }
     // Zero staking check
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
@@ -677,10 +661,7 @@ pub fn execute_set_reward_per_second(
     config.reward_per_block = reward_per_block;
     config.reward_end_block = reward_end_block;
     config.total_reward = total_reward;
-    // Set status to distribution if it is pending or ended. This can only be changed to distribution here
-    if state.status == Status::Pending || state.status == Status::Ended {
-        state.status = Status::Distribution;
-    }
+    state.last_updated_block = env.block.height;
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
     Ok(Response::default()
