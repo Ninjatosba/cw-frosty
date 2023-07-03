@@ -5,7 +5,8 @@ use cosmwasm_std::{
 use cosmwasm_std::{from_slice, CosmosMsg};
 use cw0::maybe_addr;
 
-use cw20::Cw20ReceiveMsg;
+use cw20::{Cw20ReceiveMsg, Denom};
+
 use cw_asset::Asset;
 
 use crate::helper::{calculate_weight, days_to_seconds, get_decimals};
@@ -14,8 +15,7 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Claims, Config, Denom, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS,
-    STATE,
+    CW20Balance, Claim, Claims, Config, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
@@ -78,6 +78,11 @@ pub fn instantiate(
         last_updated_block: env.block.height,
     };
     STATE.save(deps.storage, &state)?;
+
+    let reward_denom_string = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => reward_token_address.to_string(),
+        Denom::Native(denom) => denom,
+    };
     let res = Response::default()
         .add_attribute("method", "instantiate")
         .add_attribute("admin", admin)
@@ -85,10 +90,7 @@ pub fn instantiate(
             "stake_token_address",
             config.stake_token_address.to_string(),
         )
-        .add_attribute(
-            "reward_token_address",
-            config.reward_token_denom.to_string(),
-        )
+        .add_attribute("reward_token_denom", reward_denom_string)
         .add_attribute("force_claim_ratio", config.force_claim_ratio.to_string())
         .add_attribute("fee_collector", config.fee_collector);
     Ok(res)
@@ -735,7 +737,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        reward_token_address: config.reward_token_denom,
+        reward_token_denom: config.reward_token_denom,
         stake_token_address: config.stake_token_address.to_string(),
         admin: config.admin.to_string(),
         fee_collector: config.fee_collector.to_string(),

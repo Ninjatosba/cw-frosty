@@ -1,6 +1,7 @@
 use cosmwasm_std::{Addr, Decimal, Decimal256, Order, StdResult, Storage, Timestamp, Uint128};
 
 use cosmwasm_schema::cw_serde;
+use cw20::Denom;
 use cw_storage_plus::{Bound, Item, Map};
 
 use crate::ContractError;
@@ -14,19 +15,19 @@ pub struct State {
     pub last_updated_block: u64,
 }
 
-#[cw_serde]
-pub enum Denom {
-    Native(String),
-    Cw20(Addr),
-}
-impl Denom {
-    pub fn to_string(&self) -> String {
-        match self {
-            Denom::Native(string) => string.to_string(),
-            Denom::Cw20(addr) => addr.to_string(),
-        }
-    }
-}
+// #[cw_serde]
+// pub enum Denom {
+//     Native(String),
+//     Cw20(Addr),
+// }
+// impl Denom {
+//     pub fn to_string(&self) -> String {
+//         match self {
+//             Denom::Native(string) => string.to_string(),
+//             Denom::Cw20(addr) => addr.to_string(),
+//         }
+//     }
+// }
 
 pub const STATE: Item<State> = Item::new("state");
 

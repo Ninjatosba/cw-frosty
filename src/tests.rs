@@ -52,7 +52,7 @@ mod tests {
                 .add_attribute("method", "instantiate")
                 .add_attribute("admin", "creator")
                 .add_attribute("stake_token_address", "stake_token_address")
-                .add_attribute("reward_token_address", "reward_token_address")
+                .add_attribute("reward_token_denom", "reward_token_address")
                 .add_attribute("force_claim_ratio", "0.1")
                 .add_attribute("fee_collector", "fee_collector")
         );
@@ -80,7 +80,7 @@ mod tests {
                 .add_attribute("method", "instantiate")
                 .add_attribute("admin", "admin")
                 .add_attribute("stake_token_address", "stake_token_address")
-                .add_attribute("reward_token_address", "reward_token_address")
+                .add_attribute("reward_token_denom", "reward_token_address")
                 .add_attribute("force_claim_ratio", "0.1")
                 .add_attribute("fee_collector", "fee_collector")
         );
@@ -1393,6 +1393,6 @@ mod tests {
             withdraw_address: None,
         };
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
-        print!("Height: {} - AdminWithdraw: {:#?}", env.block.height, res); 
+        print!("Height: {} - AdminWithdraw: {:#?}", env.block.height, res);
     }
 }

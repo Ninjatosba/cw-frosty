@@ -2,8 +2,6 @@ use std::str::FromStr;
 
 use cosmwasm_std::{Addr, Decimal256, StdError, StdResult, Uint128};
 
-use crate::state::Denom;
-
 pub fn days_to_seconds(days: u128) -> u64 {
     (days * 24 * 60 * 60) as u64
 }
