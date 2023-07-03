@@ -659,9 +659,12 @@ pub fn execute_set_reward_per_second(
     reward_end_block = env.block.height + reward_duration_block.u128() as u64;
     // Set rewards
     config.reward_per_block = reward_per_block;
+    println!("reward_per_block: {}", reward_per_block);
     config.reward_end_block = reward_end_block;
     config.total_reward = total_reward;
+    println!("total_reward: {}", total_reward);
     state.last_updated_block = env.block.height;
+    state.total_reward_claimed = Uint128::zero();
     STATE.save(deps.storage, &state)?;
     CONFIG.save(deps.storage, &config)?;
     Ok(Response::default()
@@ -671,16 +674,17 @@ pub fn execute_set_reward_per_second(
 
 pub fn execute_admin_withdraw(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     withdraw_address: Option<String>,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let state = STATE.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
     let withdraw_address = maybe_addr(deps.api, withdraw_address)?.unwrap_or(info.sender);
+    update_reward_index(&mut state, env.block.height, config.clone())?;
 
     let unclaimed_reward = config
         .total_reward
@@ -737,6 +741,7 @@ pub fn query_config(deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<ConfigRe
         fee_collector: config.fee_collector.to_string(),
         force_claim_ratio: config.force_claim_ratio.to_string(),
         reward_per_block: config.reward_per_block,
+        total_reward: config.total_reward,
     })
 }
 

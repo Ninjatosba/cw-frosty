@@ -1155,16 +1155,6 @@ mod tests {
         );
     }
     #[test]
-    #[test]
-    pub fn test_status() {
-        // init
-        let mut deps = mock_dependencies_with_balance(&[]);
-        let init_msg = default_init();
-        let mut env = mock_env();
-        env.block.height = 1000;
-        let info = mock_info("creator", &[]);
-        instantiate(deps.as_mut(), env, info, init_msg).unwrap();
-    }
 
     pub fn test_native() {
         // init
@@ -1232,5 +1222,177 @@ mod tests {
                 amount: vec![coin(100_000, "reward_token_native")],
             })
         );
+    }
+    #[test]
+    pub fn test_scenario_2() {
+        //init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let mut env = mock_env();
+        env.block.height = 1000;
+        instantiate(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("creator", &[]),
+            init_msg,
+        )
+        .unwrap();
+
+        // try bond
+        let info = mock_info("stake_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 1000;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(1000),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // try update index
+        // Update index does noy update last updated block if end block is passed. It only updates if new reward funding is made
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.height = 1100;
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // query state
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let state: StateResponse = from_binary(&res).unwrap();
+        println!("Height: {} - State: {:#?}", env.block.height, state);
+
+        //try position update
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 1200;
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // query position
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::StakerForAllDuration {
+                address: "staker1".to_string(),
+            },
+        )
+        .unwrap();
+        let staker: StakerForAllDurationResponse = from_binary(&res).unwrap();
+        println!("Height: {} - Staker: {:#?}", env.block.height, staker);
+
+        // update rewards at 2000 block
+        // Setting reward per block to 100
+        // Sending 1000000 reward tokens to contract
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 2000;
+        let msg = ReceiveMsg::SetRewardPerBlock {
+            reward_per_block: Uint128::new(100),
+        };
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&msg).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // query state
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let state: StateResponse = from_binary(&res).unwrap();
+        println!("Height: {} - State: {:#?}", env.block.height, state);
+
+        // staker one receives rewards at 2100 block
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 2100;
+        let msg = ExecuteMsg::ReceiveReward {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        print!("Height: {} - ReceiveReward: {:#?}", env.block.height, res);
+
+        // query state
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let state: StateResponse = from_binary(&res).unwrap();
+        println!("Height: {} - State: {:#?}", env.block.height, state);
+
+        // rewards are changed again at 2200
+        // Setting reward per block to 200
+        // Sending 1000000 reward tokens to contract
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 2200;
+        let msg = ReceiveMsg::SetRewardPerBlock {
+            reward_per_block: Uint128::new(200),
+        };
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&msg).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        println!("Height: {} - SetReward: {:#?}", env.block.height, res);
+
+        // staker 1 receives at 2500
+        // 100*100 + 300*200 = 70000
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 2500;
+        let msg = ExecuteMsg::ReceiveReward {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        //pretty print it please
+        print!("Height: {} - ReceiveReward: {:#?}", env.block.height, res);
+
+        // Update index at 3000
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.height = 3000;
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // query state
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let state: StateResponse = from_binary(&res).unwrap();
+        println!("Height: {} - State: {:#?}", env.block.height, state);
+
+        // Query config
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
+        let config: ConfigResponse = from_binary(&res).unwrap();
+        println!("Height: {} - Config: {:#?}", env.block.height, config);
+
+        // lets decrease rewards at 3000
+        // Setting reward per block to 50
+        // Sending 1000000 reward tokens to contract
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 3000;
+        let msg = ReceiveMsg::SetRewardPerBlock {
+            reward_per_block: Uint128::new(50),
+        };
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&msg).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        println!("Height: {} - SetReward: {:#?}", env.block.height, res);
+
+        // staker 1 receives at 3100
+        // 500*200+ 50*100 = 105000
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 3100;
+        let msg = ExecuteMsg::ReceiveReward {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        print!("Height: {} - ReceiveReward: {:#?}", env.block.height, res);
+
+        // lets try admin withdraw
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.height = 3200;
+        let msg = ExecuteMsg::AdminWithdraw {
+            withdraw_address: None,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        print!("Height: {} - AdminWithdraw: {:#?}", env.block.height, res); 
     }
 }

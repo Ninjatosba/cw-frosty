@@ -84,6 +84,7 @@ pub struct ConfigResponse {
     pub fee_collector: String,
     pub force_claim_ratio: String,
     pub reward_per_block: Uint128,
+    pub total_reward: Uint128,
 }
 
 #[cw_serde]
