@@ -48,6 +48,8 @@ pub enum ExecuteMsg {
     AdminWithdraw {
         withdraw_address: Option<String>,
     },
+    Terminate {},
+    ExitTerminated {},
 }
 
 #[cw_serde]

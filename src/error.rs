@@ -82,6 +82,12 @@ pub enum ContractError {
 
     #[error("Status is not distribution")]
     NotDistribution {},
+
+    #[error("Status is not terminated")]
+    NotTerminated {},
+
+    #[error("Status is terminated")]
+    Terminated {},
 }
 
 impl From<AssetError> for ContractError {

@@ -13,21 +13,14 @@ pub struct State {
     pub total_weight: Decimal256,
     pub total_reward_claimed: Uint128,
     pub last_updated_block: u64,
+    pub status: Status,
 }
 
-// #[cw_serde]
-// pub enum Denom {
-//     Native(String),
-//     Cw20(Addr),
-// }
-// impl Denom {
-//     pub fn to_string(&self) -> String {
-//         match self {
-//             Denom::Native(string) => string.to_string(),
-//             Denom::Cw20(addr) => addr.to_string(),
-//         }
-//     }
-// }
+#[cw_serde]
+pub enum Status {
+    Active,
+    Terminated,
+}
 
 pub const STATE: Item<State> = Item::new("state");
 

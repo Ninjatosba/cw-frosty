@@ -15,12 +15,14 @@ use crate::msg::{
     QueryMsg, ReceiveMsg, StakerForAllDurationResponse, StakerResponse, StateResponse,
 };
 use crate::state::{
-    CW20Balance, Claim, Claims, Config, StakePosition, State, CLAIMS_KEY, CONFIG, STAKERS, STATE,
+    self, CW20Balance, Claim, Claims, Config, StakePosition, State, Status, CLAIMS_KEY, CONFIG,
+    STAKERS, STATE,
 };
 use crate::ContractError;
 use cosmwasm_std;
 
 use std::convert::TryInto;
+use std::env;
 use std::ops::Add;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -76,6 +78,7 @@ pub fn instantiate(
         total_weight: Decimal256::zero(),
         total_reward_claimed: Uint128::zero(),
         last_updated_block: env.block.height,
+        status: Status::Active,
     };
     STATE.save(deps.storage, &state)?;
 
@@ -127,6 +130,8 @@ pub fn execute(
         ExecuteMsg::AdminWithdraw { withdraw_address } => {
             execute_admin_withdraw(deps, env, info, withdraw_address)
         }
+        ExecuteMsg::Terminate {} => execute_terminate(env, deps, info),
+        ExecuteMsg::ExitTerminated {} => execute_exit_terminated(env, deps, info),
     }
 }
 
@@ -159,6 +164,7 @@ pub fn execute_bond(
     duration: u128,
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
     // check denom
     if balance.denom != cfg.stake_token_address {
         return Err(ContractError::InvalidCw20TokenAddress {});
@@ -167,13 +173,16 @@ pub fn execute_bond(
     if duration < 1 || duration > cfg.max_bond_duration {
         return Err(ContractError::InvalidBondDuration {});
     }
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
 
     let amount = balance.amount;
 
     if amount.is_zero() {
         return Err(ContractError::NoFund {});
     }
-    let mut state = STATE.load(deps.storage)?;
     // look for this address and desired duration in STAKERS
     let staker = STAKERS.may_load(deps.storage, (&balance.sender, duration))?;
 
@@ -234,6 +243,9 @@ pub fn execute_update_reward_index(deps: DepsMut, env: Env) -> Result<Response, 
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
     // Check Status
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
 
     update_reward_index(&mut state, env.block.height, config)?;
 
@@ -289,6 +301,10 @@ pub fn execute_update_staker_rewards(
     // Zero staking check
     if state.total_staked.is_zero() {
         return Err(ContractError::NoBond {});
+    }
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
     }
     // update global index
     update_reward_index(&mut state, env.block.height, config.clone())?;
@@ -353,6 +369,10 @@ pub fn execute_receive_reward(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
 
     // update global index
     update_reward_index(&mut state, env.block.height, config.clone())?;
@@ -410,6 +430,10 @@ pub fn execute_unbond(
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     let config = CONFIG.load(deps.storage)?;
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
 
     let mut staker = STAKERS.load(deps.storage, (&info.sender, duration_as_days))?;
     // rewards for desired duration is updated and pending rewards are set to zero
@@ -487,9 +511,15 @@ pub fn execute_update_config(
     admin: Option<String>,
 ) -> Result<Response, ContractError> {
     let mut config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
+
     if let Some(force_claim_ratio) = force_claim_ratio {
         config.force_claim_ratio = force_claim_ratio;
     }
@@ -510,6 +540,11 @@ pub fn execute_claim(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     let claims = Claims::new(CLAIMS_KEY);
+    let state = STATE.load(deps.storage)?;
+    // check if contract is terminated
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
     // load mature claims where release_at < now using second key.
     let mature_claims: Vec<Claim> =
         claims.load_mature_claims(deps.storage, info.sender.clone(), env.block.time.seconds())?;
@@ -540,6 +575,7 @@ pub fn execute_force_claim(
     release_at: Timestamp,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
     let mut claims =
         Claims::new(CLAIMS_KEY).load(deps.storage, info.sender.clone(), release_at.seconds())?;
 
@@ -549,6 +585,10 @@ pub fn execute_force_claim(
 
     if release_at.seconds() < env.block.time.seconds() {
         return Err(ContractError::InvalidReleaseTime {});
+    }
+
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
     }
 
     let remaining_time = release_at.minus_seconds(env.block.time.seconds()).seconds();
@@ -602,6 +642,9 @@ pub fn execute_set_reward_per_second(
 
     if reward_per_block <= Uint128::zero() {
         return Err(ContractError::InvalidRewardPerSecond {});
+    };
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
     };
     let reward_end_block;
     let total_reward;
@@ -685,8 +728,10 @@ pub fn execute_admin_withdraw(
     if info.sender != config.admin {
         return Err(ContractError::Unauthorized {});
     }
+    if state.status == Status::Active {
+        return Err(ContractError::NotTerminated {});
+    }
     let withdraw_address = maybe_addr(deps.api, withdraw_address)?.unwrap_or(info.sender);
-    update_reward_index(&mut state, env.block.height, config.clone())?;
 
     let unclaimed_reward = config
         .total_reward
@@ -703,6 +748,46 @@ pub fn execute_admin_withdraw(
         .add_attribute("action", "admin_withdraw")
         .add_attribute("amount", unclaimed_reward.to_string());
     Ok(res)
+}
+
+pub fn execute_terminate(
+    env: Env,
+    deps: DepsMut,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
+    if info.sender != config.admin {
+        return Err(ContractError::Unauthorized {});
+    }
+    if state.status == Status::Terminated {
+        return Err(ContractError::Terminated {});
+    }
+    // update global index but this update should not be trigered again
+    update_reward_index(&mut state, env.block.height, config.clone())?;
+    state.status = Status::Terminated;
+    STATE.save(deps.storage, &state)?;
+    Ok(Response::default()
+        .add_attribute("action", "terminate")
+        .add_attribute("terminated_by", info.sender))
+}
+pub fn execute_exit_terminated(
+    env: Env,
+    deps: DepsMut,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
+
+    if state.status != Status::Terminated {
+        return Err(ContractError::NotTerminated {});
+    }
+    // exit logic for positions
+
+    STATE.save(deps.storage, &state)?;
+    Ok(Response::default()
+        .add_attribute("action", "exit_terminated")
+        .add_attribute("terminated_by", info.sender))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
