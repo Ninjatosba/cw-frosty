@@ -1560,5 +1560,12 @@ mod tests {
         );
         let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
         assert_eq!(claims.claims, vec![]);
+
+        // Query state
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::State {}).unwrap();
+        let state: StateResponse = from_binary(&res).unwrap();
+        assert_eq!(state.total_staked, Uint128::new(0));
+        assert_eq!(state.total_weight, Decimal256::zero());
+        assert_eq!(state.total_reward_claimed, Uint128::new(20000));
     }
 }

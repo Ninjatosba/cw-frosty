@@ -762,59 +762,41 @@ pub fn execute_exit_terminated(
     if state.status != Status::Terminated {
         return Err(ContractError::NotTerminated {});
     }
-    let rewards: Uint128 = STAKERS
+
+    let mut total_rewards: Uint128 = Uint128::zero();
+    let mut total_lp: Uint128 = Uint128::zero();
+
+    let mut positions: Vec<StakePosition> = vec![];
+
+    let positions: Vec<StakePosition> = STAKERS
         .prefix(&info.sender)
         .range(deps.storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<_>>>()?
         .into_iter()
-        .map(|(_, mut staker)| {
-            let reward =
-                match update_staker_rewards(env.block.height, &mut staker, state.global_index) {
-                    Ok(reward) => {
-                        staker.pending_rewards = Uint128::zero();
-                        STAKERS
-                            .save(
-                                deps.storage,
-                                (&info.sender, staker.unbond_duration_as_days),
-                                &staker,
-                            )
-                            .unwrap_or_default();
-                        reward
-                    }
-                    Err(err) => {
-                        return Uint128::zero();
-                    }
-                };
-            reward
-        })
-        .sum();
-    let bond_amount: Uint128 = STAKERS
-        .prefix(&info.sender)
-        .range(deps.storage, None, None, Order::Ascending)
-        .collect::<StdResult<Vec<_>>>()?
-        .into_iter()
-        .map(|(_, staker)| staker.staked_amount)
-        .sum();
+        .map(|(_, staker)| staker)
+        .collect();
+
+    for mut staker in positions {
+        update_staker_rewards(env.block.height, &mut staker, state.global_index)?;
+        total_lp = total_lp + staker.staked_amount;
+        total_rewards = total_rewards + staker.pending_rewards;
+        state.total_staked = state.total_staked.checked_sub(staker.staked_amount)?;
+        state.total_weight = state.total_weight.checked_sub(staker.position_weight)?;
+        STAKERS.remove(deps.storage, (&info.sender, staker.unbond_duration_as_days));
+    }
     // User who unbonded before termination should not have to wait for the unbonding period
     let total_claims = Claims::new(CLAIMS_KEY).load_all(deps.storage, info.sender.clone())?;
     let total_claim_amount: Uint128 = total_claims.into_iter().map(|c| c.amount).sum();
+    total_lp = total_lp.checked_add(total_claim_amount)?;
 
     // Delete all claims and positions
-    Claims::new(CLAIMS_KEY).remove_all(deps.storage, info.sender.clone());
-
-    STAKERS
-        .prefix(&info.sender.clone())
-        .range(deps.storage, None, None, Order::Ascending)
-        .map(|x| x.map(|(k, _v)| k))
-        .collect::<StdResult<Vec<_>>>()?
-        .into_iter()
-        .for_each(|k| STAKERS.remove(deps.storage, (&info.sender, k)));
+    Claims::new(CLAIMS_KEY).remove_all(deps.storage, info.sender.clone())?;
 
     let reward_asset = match config.reward_token_denom {
-        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),
-        Denom::Native(denom) => Asset::native(denom, rewards),
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, total_rewards),
+        Denom::Native(denom) => Asset::native(denom, total_rewards),
     };
-    let lp_asset = Asset::cw20(config.stake_token_address, bond_amount + total_claim_amount);
+    let lp_asset = Asset::cw20(config.stake_token_address, total_lp);
     let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
     let lp_msg = lp_asset.transfer_msg(info.sender.clone())?;
 
