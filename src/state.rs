@@ -139,6 +139,16 @@ impl<'a> Claims<'a> {
             .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));
         Ok(())
     }
+    pub fn remove_all(&self, store: &mut dyn Storage, address: Addr) -> Result<(), ContractError> {
+        self.0
+            .sub_prefix(address.clone())
+            .range(store, None, None, Order::Ascending)
+            .map(|x| x.map(|(k, _v)| k))
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .for_each(|k| self.0.remove(store, (address.clone(), k.0, k.1)));
+        Ok(())
+    }
 }
 #[cw_serde]
 pub struct Config {

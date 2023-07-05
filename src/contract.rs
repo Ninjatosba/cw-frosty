@@ -782,10 +782,65 @@ pub fn execute_exit_terminated(
     if state.status != Status::Terminated {
         return Err(ContractError::NotTerminated {});
     }
-    // exit logic for positions
+    let rewards: Uint128 = STAKERS
+        .prefix(&info.sender)
+        .range(deps.storage, None, None, Order::Ascending)
+        .collect::<StdResult<Vec<_>>>()?
+        .into_iter()
+        .map(|(_, mut staker)| {
+            let reward =
+                match update_staker_rewards(env.block.height, &mut staker, state.global_index) {
+                    Ok(reward) => {
+                        staker.pending_rewards = Uint128::zero();
+                        STAKERS
+                            .save(
+                                deps.storage,
+                                (&info.sender, staker.unbond_duration_as_days),
+                                &staker,
+                            )
+                            .unwrap_or_default();
+                        reward
+                    }
+                    Err(err) => {
+                        return Uint128::zero();
+                    }
+                };
+            reward
+        })
+        .sum();
+    let bond_amount: Uint128 = STAKERS
+        .prefix(&info.sender)
+        .range(deps.storage, None, None, Order::Ascending)
+        .collect::<StdResult<Vec<_>>>()?
+        .into_iter()
+        .map(|(_, staker)| staker.staked_amount)
+        .sum();
+    // User who unbonded before termination should not have to wait for the unbonding period
+    let total_claims = Claims::new(CLAIMS_KEY).load_all(deps.storage, info.sender.clone())?;
+    let total_claim_amount: Uint128 = total_claims.into_iter().map(|c| c.amount).sum();
+
+    // Delete all claims and positions
+    Claims::new(CLAIMS_KEY).remove_all(deps.storage, info.sender.clone());
+
+    STAKERS
+        .prefix(&info.sender.clone())
+        .range(deps.storage, None, None, Order::Ascending)
+        .map(|x| x.map(|(k, _v)| k))
+        .collect::<StdResult<Vec<_>>>()?
+        .into_iter()
+        .for_each(|k| STAKERS.remove(deps.storage, (&info.sender, k)));
+
+    let reward_asset = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, rewards),
+        Denom::Native(denom) => Asset::native(denom, rewards),
+    };
+    let lp_asset = Asset::cw20(config.stake_token_address, bond_amount + total_claim_amount);
+    let reward_msg = reward_asset.transfer_msg(info.sender.clone())?;
+    let lp_msg = lp_asset.transfer_msg(info.sender.clone())?;
 
     STATE.save(deps.storage, &state)?;
     Ok(Response::default()
+        .add_messages(vec![reward_msg, lp_msg])
         .add_attribute("action", "exit_terminated")
         .add_attribute("terminated_by", info.sender))
 }
