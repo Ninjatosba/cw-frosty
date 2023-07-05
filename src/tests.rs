@@ -1426,13 +1426,25 @@ mod tests {
         });
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
 
-        // Unbond half
+        // Unbond 1/4
         // On unbond user will receive rewards for the position
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
         env.block.height = 2100;
         let msg = ExecuteMsg::UnbondStake {
-            amount: Some(Uint128::new(500)),
+            amount: Some(Uint128::new(250)),
+            duration_as_days: 16,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // Change the time and unbond again
+        // Claim works with block time this way we will create two diffirent claims for same position
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(1000);
+        env.block.height = 2150;
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(250)),
             duration_as_days: 16,
         };
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
@@ -1505,10 +1517,31 @@ mod tests {
 
         // Exit terminated for staker
         // Staker should receive
-        // 100*100 rewards
+        // 50*100 rewards
         // 500 lp for bonded tokens
         // 500 lp for tokens in unbonding state
         // After the execution all positions and claims should be deleted for user
+        // Lets check positions and claims before exit
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::StakerForAllDuration {
+                address: "staker1".to_string(),
+            },
+        );
+        let staker: StakerForAllDurationResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(staker.positions.len(), 1);
+
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::ListClaims {
+                address: "staker1".to_string(),
+            },
+        );
+        let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(claims.claims.len(), 2);
+        // Exit terminated
         let info = mock_info("staker1", &[]);
         let mut env = mock_env();
         env.block.height = 2400;
@@ -1520,7 +1553,7 @@ mod tests {
                 contract_addr: "reward_token_address".to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "staker1".to_string(),
-                    amount: Uint128::new(10000),
+                    amount: Uint128::new(5000),
                 })
                 .unwrap(),
                 funds: vec![],
