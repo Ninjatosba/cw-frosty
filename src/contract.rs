@@ -127,10 +127,9 @@ pub fn execute(
         ExecuteMsg::SetRewardPerBlock { reward_per_block } => {
             execute_set_reward_per_second(deps, env, info, reward_per_block, None)
         }
-        ExecuteMsg::AdminWithdraw { withdraw_address } => {
-            execute_admin_withdraw(deps, env, info, withdraw_address)
+        ExecuteMsg::Terminate { withdraw_address } => {
+            execute_terminate(env, deps, info, withdraw_address)
         }
-        ExecuteMsg::Terminate {} => execute_terminate(env, deps, info),
         ExecuteMsg::ExitTerminated {} => execute_exit_terminated(env, deps, info),
     }
 }
@@ -717,43 +716,11 @@ pub fn execute_set_reward_per_second(
         .add_attribute("reward_per_second", reward_per_block.to_string()))
 }
 
-pub fn execute_admin_withdraw(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    withdraw_address: Option<String>,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    let mut state = STATE.load(deps.storage)?;
-    if info.sender != config.admin {
-        return Err(ContractError::Unauthorized {});
-    }
-    if state.status == Status::Active {
-        return Err(ContractError::NotTerminated {});
-    }
-    let withdraw_address = maybe_addr(deps.api, withdraw_address)?.unwrap_or(info.sender);
-
-    let unclaimed_reward = config
-        .total_reward
-        .checked_sub(state.total_reward_claimed)?;
-
-    let reward_asset = match config.reward_token_denom {
-        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, unclaimed_reward),
-        Denom::Native(denom) => Asset::native(denom, unclaimed_reward),
-    };
-    let reward_msg = reward_asset.transfer_msg(withdraw_address)?;
-
-    let res = Response::new()
-        .add_message(reward_msg)
-        .add_attribute("action", "admin_withdraw")
-        .add_attribute("amount", unclaimed_reward.to_string());
-    Ok(res)
-}
-
 pub fn execute_terminate(
     env: Env,
     deps: DepsMut,
     info: MessageInfo,
+    withdraw_address: Option<String>,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     let mut state = STATE.load(deps.storage)?;
@@ -765,9 +732,22 @@ pub fn execute_terminate(
     }
     // update global index but this update should not be trigered again
     update_reward_index(&mut state, env.block.height, config.clone())?;
+    let withdraw_address = maybe_addr(deps.api, withdraw_address)?.unwrap_or(info.sender.clone());
+
+    let unclaimed_reward = config
+        .total_reward
+        .checked_sub(state.total_reward_claimed)?;
+
+    let reward_asset = match config.reward_token_denom {
+        Denom::Cw20(reward_token_address) => Asset::cw20(reward_token_address, unclaimed_reward),
+        Denom::Native(denom) => Asset::native(denom, unclaimed_reward),
+    };
+    let reward_msg = reward_asset.transfer_msg(withdraw_address)?;
+
     state.status = Status::Terminated;
     STATE.save(deps.storage, &state)?;
     Ok(Response::default()
+        .add_message(reward_msg)
         .add_attribute("action", "terminate")
         .add_attribute("terminated_by", info.sender))
 }

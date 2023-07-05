@@ -45,10 +45,9 @@ pub enum ExecuteMsg {
         fee_collector: Option<String>,
         force_claim_ratio: Option<Decimal>,
     },
-    AdminWithdraw {
+    Terminate {
         withdraw_address: Option<String>,
     },
-    Terminate {},
     ExitTerminated {},
 }
 

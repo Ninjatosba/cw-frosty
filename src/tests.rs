@@ -7,7 +7,7 @@ mod tests {
     };
     use cosmwasm_std::{
         coin, from_binary, to_binary, Addr, BankMsg, Coin, CosmosMsg, Decimal, Decimal256, Env,
-        MessageInfo, Response, StdError, Timestamp, Uint128, WasmMsg,
+        MessageInfo, Response, StdError, SubMsg, Timestamp, Uint128, WasmMsg,
     };
     use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
@@ -1384,15 +1384,181 @@ mod tests {
         let msg = ExecuteMsg::ReceiveReward {};
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
         print!("Height: {} - ReceiveReward: {:#?}", env.block.height, res);
+    }
 
-        // lets try admin withdraw
+    #[test]
+    pub fn test_termination() {
+        //init
+        let mut deps = mock_dependencies_with_balance(&[]);
+        let init_msg = default_init();
+        let mut env = mock_env();
+        env.block.height = 1000;
+        instantiate(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("creator", &[]),
+            init_msg,
+        )
+        .unwrap();
+
+        // Bond
+        let info = mock_info("stake_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 1000;
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "staker1".to_string(),
+            amount: Uint128::new(1000),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // Update rewards
+        let info = mock_info("reward_token_address", &[]);
+        let mut env = mock_env();
+        env.block.height = 2000;
+        let msg = ReceiveMsg::SetRewardPerBlock {
+            reward_per_block: Uint128::new(100),
+        };
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&msg).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // Unbond half
+        // On unbond user will receive rewards for the position
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 2100;
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(500)),
+            duration_as_days: 16,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+
+        // Terminate
+        // Creator will receive all the remaining rewards=> 1_000_000-100*200 = 980_000
         let info = mock_info("creator", &[]);
         let mut env = mock_env();
-        env.block.height = 3200;
-        let msg = ExecuteMsg::AdminWithdraw {
+        env.block.height = 2200;
+        let msg = ExecuteMsg::Terminate {
+            withdraw_address: None,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "reward_token_address".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "creator".to_string(),
+                    amount: Uint128::new(980000),
+                })
+                .unwrap(),
+                funds: vec![],
+            })
+        );
+
+        // Try every execution after termination should return error except for exit_terminated
+        let info = mock_info("creator", &[]);
+        let mut env = mock_env();
+        env.block.height = 2300;
+        let msg = ExecuteMsg::ReceiveReward {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        let msg = ExecuteMsg::UnbondStake {
+            amount: Some(Uint128::new(500)),
+            duration_as_days: 16,
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        let msg = ExecuteMsg::UpdateRewardIndex {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        let msg = ExecuteMsg::UpdateStakerRewards { address: None };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        let msg = ExecuteMsg::Terminate {
             withdraw_address: None,
         };
         let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
-        print!("Height: {} - AdminWithdraw: {:#?}", env.block.height, res);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        let msg = ExecuteMsg::SetRewardPerBlock {
+            reward_per_block: Uint128::new(1),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+        // Try bonding
+        let info = mock_info("stake_token_address", &[]);
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "creator".to_string(),
+            amount: Uint128::new(1000000),
+            msg: to_binary(&ReceiveMsg::Bond { duration_day: 16 }).unwrap(),
+        });
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg);
+        assert_eq!(res.unwrap_err(), ContractError::Terminated {});
+
+        // Exit terminated for staker
+        // Staker should receive
+        // 100*100 rewards
+        // 500 lp for bonded tokens
+        // 500 lp for tokens in unbonding state
+        // After the execution all positions and claims should be deleted for user
+        let info = mock_info("staker1", &[]);
+        let mut env = mock_env();
+        env.block.height = 2400;
+        let msg = ExecuteMsg::ExitTerminated {};
+        let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "reward_token_address".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "staker1".to_string(),
+                    amount: Uint128::new(10000),
+                })
+                .unwrap(),
+                funds: vec![],
+            })
+        );
+        assert_eq!(
+            res.messages[1].msg,
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "stake_token_address".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "staker1".to_string(),
+                    amount: Uint128::new(1000),
+                })
+                .unwrap(),
+                funds: vec![],
+            })
+        );
+
+        // Query position
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::StakerForAllDuration {
+                address: "staker1".to_string(),
+            },
+        );
+        let staker: StakerForAllDurationResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(staker.positions, vec![]);
+
+        // Query claims
+        let res = query(
+            deps.as_ref(),
+            env.clone(),
+            QueryMsg::ListClaims {
+                address: "staker1".to_string(),
+            },
+        );
+        let claims: ListClaimsResponse = from_binary(&res.unwrap()).unwrap();
+        assert_eq!(claims.claims, vec![]);
     }
 }
